@@ -109,7 +109,7 @@ describe('metric-scoring.util', () => {
       expect(score).toBeLessThan(40);
     });
 
-    it('detects burnout risk when long days combine with exhaustion', () => {
+    it('detects burnout risk when long days combine with low energy', () => {
       const score = calculateSustainabilityScore(360, 600, 1);
       expect(score).toBeLessThanOrEqual(30);
     });

@@ -11,7 +11,7 @@ import { Metric } from './metric.model';
 
 export const PRODUCTIVITY_WEIGHTS = {
   IMPACT: 0.65, // User's assessment of work significance (primary driver)
-  FOCUS: 0.3, // Progress toward deep work target (soft-capped)
+  FOCUS: 0.3, // Progress toward deep work target (full credit at target, flat beyond)
   TOTAL_WORK: 0.05, // Credit for overall effort (capped at 10h)
 } as const;
 
@@ -20,7 +20,7 @@ export const PRODUCTIVITY_WEIGHTS = {
  * Freshness leads to emphasize energy and burnout prevention.
  */
 export const SUSTAINABILITY_WEIGHTS = {
-  FRESHNESS: 0.45, // Energy level (from simple check-in or detailed exhaustion)
+  FRESHNESS: 0.45, // Energy level (from check-in or neutral fallback)
   WORKLOAD: 0.4, // Reasonable work hours (penalizes overwork)
   FOCUS_BALANCE: 0.15, // Inverted-V curve - optimal at 4h, penalizes excess
 } as const;
@@ -39,7 +39,6 @@ export const TIME_TARGETS = {
  */
 export const SCALE_CONVERSIONS = {
   IMPACT_SCALE_MAX: 4, // Impact rating is 1-4 (simplified from 1-5)
-  EXHAUSTION_SCALE_MAX: 5, // Exhaustion is 1-5 (higher = worse)
   ENERGY_CHECKIN_MIN: 1, // Energy check-in is 1-3
   ENERGY_CHECKIN_DIVISOR: 2, // Convert (value - 1) / 2 to get 0-1 range
 } as const;
