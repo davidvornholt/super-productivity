@@ -65,6 +65,8 @@ export interface IssueFieldsForTask {
   issueLastSyncedValues?: Record<string, unknown>;
 }
 
+export type TaskPriority = 'high' | 'medium' | 'low';
+
 // Extend the plugin Task type with app-specific fields
 // Omit issue fields from PluginTask to avoid conflict with IssueFieldsForTask
 export interface TaskCopy
@@ -87,13 +89,21 @@ export interface TaskCopy
   // Additional app-specific fields
 
   /**
+   * Optional High / Medium / Low priority. `undefined` and `null` both mean "no
+   * priority" and are treated the same by sorting and filtering.
+   * Persisted as an optional field (no schema bump); older clients carry it as
+   * an unknown field.
+   */
+  priority?: TaskPriority | null;
+
+  /**
    * Scheduled time as Unix timestamp (ms). For tasks scheduled with a specific time.
    *
    * IMPORTANT: dueWithTime and dueDay follow a mutual exclusivity pattern:
    * - When dueWithTime is set, dueDay MUST be undefined/null (not both set)
    * - When reading, check dueWithTime FIRST (it takes priority over dueDay)
    *
-   * @see docs/ai/dueDay-dueWithTime-mutual-exclusivity.md
+   * @see ARCHITECTURE-DECISIONS.md Decision #1
    */
   dueWithTime?: number | null;
 
@@ -106,7 +116,7 @@ export interface TaskCopy
    * - When reading, check dueWithTime FIRST (it takes priority over dueDay)
    * - Legacy data may have both fields set; handle via priority pattern
    *
-   * @see docs/ai/dueDay-dueWithTime-mutual-exclusivity.md
+   * @see ARCHITECTURE-DECISIONS.md Decision #1
    */
   dueDay?: string | null;
   hasPlannedTime?: boolean;
@@ -219,6 +229,17 @@ export interface TaskState extends EntityState<Task> {
   taskDetailTargetPanel?: TaskDetailTargetPanel | null;
   lastCurrentTaskId: string | null;
   isDataLoaded: boolean;
+  /**
+   * iCal event IDs whose imported tasks were explicitly deleted, scoped by provider.
+   * Optional because persisted task state from older versions does not contain it.
+   * Provider deletion intentionally does not prune this commutative tombstone set:
+   * concurrent provider/task deletes must converge regardless of replay order.
+   * shortcut: grow-only — entries carry no timestamp, so nothing can age them out
+   * deterministically (deleting a daily recurring occurrence every day adds ~250
+   * entries/year; non-recurring dismissals stay relevant forever). If growth ever
+   * matters, record the dismissal day in the delete op payload and prune on replay.
+   */
+  dismissedCalendarAutoImportEventIdsByProvider?: Record<string, string[]>;
 }
 
 export interface WorklogTask extends Task {

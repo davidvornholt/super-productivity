@@ -1,11 +1,12 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { SearchResultItem } from '../../issue.model';
 import { PlainspaceCfg } from './plainspace.model';
 import { PlainspaceIssue } from './plainspace-issue.model';
 import { mapPlainspaceIssueToSearchResult } from './plainspace-issue-map.util';
+import { Log } from '../../../../core/log';
 
 /**
  * HTTP access to the real Plainspace integration API (plainspace.org /
@@ -15,8 +16,8 @@ import { mapPlainspaceIssueToSearchResult } from './plainspace-issue-map.util';
  * server-side — no client-side identity filtering is needed.
  *
  * The wire format (`SPTask`) is mapped to the provider-internal `PlainspaceIssue`
- * here, keeping the real contract isolated to this file. See
- * docs/plainspace-api-extension-plan.md for the endpoint contract.
+ * here, keeping the real contract isolated to this file — the DTO interfaces
+ * below are the endpoint contract.
  *
  * Reads fail soft (empty list / null) so a Plainspace outage never blocks the SP
  * UI; `createSpace$` lets errors propagate so the share flow can report them.
@@ -25,11 +26,36 @@ import { mapPlainspaceIssueToSearchResult } from './plainspace-issue-map.util';
 export class PlainspaceApiService {
   private _http = inject(HttpClient);
 
+  /**
+   * Verifies a token against the host, keeping "the server rejected this token"
+   * (401/403) apart from "we never got an answer" (offline, DNS, TLS, 5xx). The
+   * connect dialog needs that distinction: reporting a bad token for a request
+   * that never arrived sends users into an endless re-copy loop (#9988).
+   */
+  verifyToken$(cfg: PlainspaceCfg): Observable<PlainspaceTokenCheck> {
+    // The body is typed `| null` on purpose: HttpClient declares it as the
+    // generic but emits null for an empty body (a 204, or a 200 with no content
+    // — a proxy or captive portal answering for the host). An empty body is no
+    // verdict on the token and must never pass for a verified account (#9988).
+    return this._http
+      .get<SPMeResponse | null>(`${this._base(cfg)}/me`, { headers: this._headers(cfg) })
+      .pipe(
+        map((me): PlainspaceTokenCheck => {
+          if (me) {
+            return { status: 'ok', me };
+          }
+          Log.err('Plainspace: token check got an empty body');
+          return { status: 'unreachable' };
+        }),
+        catchError((err: unknown) => of(toTokenCheck(err))),
+      );
+  }
+
   /** Verifies the token and returns the account's email + spaces, or null. */
   getMe$(cfg: PlainspaceCfg): Observable<SPMeResponse | null> {
-    return this._http
-      .get<SPMeResponse>(`${this._base(cfg)}/me`, { headers: this._headers(cfg) })
-      .pipe(catchError(() => of(null)));
+    return this.verifyToken$(cfg).pipe(
+      map((res) => (res.status === 'ok' ? res.me : null)),
+    );
   }
 
   /**
@@ -137,24 +163,19 @@ export class PlainspaceApiService {
   }
 
   /**
-   * Pushes a field change back to Plainspace — done state, title, and/or
-   * scheduled time (`scheduledAt`) — in a single PATCH; null on failure.
-   * `scheduledAt` is an ISO instant, or null to unschedule. Used by the
-   * two-way-sync adapter.
+   * Pushes a completion change back to Plainspace; null on failure.
    */
   patchTask$(
     id: string,
-    fields: { done?: boolean; title?: string; scheduledAt?: string | null },
+    fields: { done: boolean },
     cfg: PlainspaceCfg,
-  ): Observable<PlainspaceIssue | null> {
+  ): Observable<PlainspaceCompletionConfirmation | null> {
     return this._http
-      .patch<SPTaskResponse>(
-        `${this._base(cfg)}/tasks/${encodeURIComponent(id)}`,
-        fields,
-        { headers: this._headers(cfg) },
-      )
+      .patch<unknown>(`${this._base(cfg)}/tasks/${encodeURIComponent(id)}`, fields, {
+        headers: this._headers(cfg),
+      })
       .pipe(
-        map((res) => mapSPTaskToIssue(res.task)),
+        map(parsePlainspaceCompletionConfirmation),
         catchError(() => of(null)),
       );
   }
@@ -208,6 +229,26 @@ export class PlainspaceApiService {
   }
 }
 
+/**
+ * Outcome of a `/me` token check. A rejected token and an unanswered request
+ * are different user problems and must not collapse into one message (#9988).
+ */
+export type PlainspaceTokenCheck =
+  | { status: 'ok'; me: SPMeResponse }
+  | { status: 'invalid-token' }
+  | { status: 'unreachable' };
+
+// 401/403 is the server giving a verdict on the token; everything else (status
+// 0 = no response at all, 5xx, a non-HTTP throw) means we never got one. Only
+// the status is logged — never the token or the host (sync rule #9).
+const toTokenCheck = (err: unknown): PlainspaceTokenCheck => {
+  const status = err instanceof HttpErrorResponse ? err.status : 0;
+  Log.err('Plainspace: token check failed', { status });
+  return status === 401 || status === 403
+    ? { status: 'invalid-token' }
+    : { status: 'unreachable' };
+};
+
 /** A Plainspace space (project) the connected account can bind a provider to. */
 export interface PlainspaceSpace {
   id: string;
@@ -228,8 +269,7 @@ interface SPTask {
   createdAt: string;
   updatedAt: string;
   // ISO instant the task is scheduled for, or null when unscheduled. For
-  // recurring items this is the next occurrence (server-advanced). See
-  // docs/plainspace-api-extension-plan.md §scheduling.
+  // recurring items this is the next occurrence (server-advanced).
   scheduledAt: string | null;
   // Whether the task repeats in Plainspace (the cadence stays server-side).
   isRecurring: boolean;
@@ -239,6 +279,8 @@ interface SPTaskResponse {
   task: SPTask;
 }
 
+type PlainspaceCompletionConfirmation = Pick<PlainspaceIssue, 'id' | 'isDone'>;
+
 interface SPTasksResponse {
   tasks: SPTask[];
 }
@@ -247,7 +289,7 @@ interface SPCreateSpaceResponse {
   project: { id: string };
 }
 
-interface SPMeResponse {
+export interface SPMeResponse {
   email: string;
   projects: {
     id: string;
@@ -263,6 +305,26 @@ interface SPMeResponse {
 const matchesSpace = (t: SPTask, spaceId: string | null | undefined): boolean =>
   !spaceId || t.projectId === spaceId || t.projectSlug === spaceId;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const parsePlainspaceCompletionConfirmation = (
+  value: unknown,
+): PlainspaceCompletionConfirmation | null => {
+  if (!isRecord(value) || !isRecord(value['task'])) {
+    return null;
+  }
+  const task = value['task'];
+  if (
+    typeof task['id'] !== 'string' ||
+    !task['id'] ||
+    typeof task['done'] !== 'boolean'
+  ) {
+    return null;
+  }
+  return { id: task['id'], isDone: task['done'] };
+};
+
 const mapSPTaskToIssue = (t: SPTask): PlainspaceIssue => ({
   id: t.id,
   title: t.title,
@@ -270,11 +332,8 @@ const mapSPTaskToIssue = (t: SPTask): PlainspaceIssue => ({
   updatedAt: t.updatedAt,
   url: t.url,
   projectId: t.projectId,
-  // Normalize to a canonical UTC ISO instant on read. The two-way-sync baseline
-  // and push both compare `scheduledAt` by exact string, and the push side emits
-  // `new Date(ms).toISOString()` — so an equivalent-but-differently-formatted
-  // server value (offset vs Z, ms precision) would otherwise read as a remote
-  // change and silently drop the user's reschedule.
+  // Normalize to a canonical UTC ISO instant so equivalent server encodings do
+  // not appear as schedule changes in polling and baseline comparisons.
   scheduledAt: t.scheduledAt ? new Date(t.scheduledAt).toISOString() : null,
   isRecurring: !!t.isRecurring,
 });

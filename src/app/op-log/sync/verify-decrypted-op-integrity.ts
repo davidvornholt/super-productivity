@@ -1,9 +1,10 @@
 import { extractActionPayload } from '@sp/sync-core';
 import { SyncOperation } from '../sync-providers/provider.interface';
-import { isLwwUpdateActionType } from '../core/lww-update-action-types';
-import { isSingletonEntityId } from '../core/entity-registry';
+import { getLwwEntityType } from '../core/lww-update-action-types';
+import { isLwwPayloadIdCanonical } from '../core/entity-registry';
 import { OperationIntegrityError } from '../core/errors/sync-errors';
 import { ACTION_TYPE_ALIASES } from '../apply/operation-converter.util';
+import { ActionType } from '../core/action-types.enum';
 import { SyncLog } from '../../core/log';
 import {
   extractFullStateFromPayload,
@@ -162,10 +163,12 @@ const _migrateFullStateForValidation = (
  * resolve the mismatch by trusting the tampered `op.entityId` over the
  * authenticated `payload.id` (it coerces `payload.id = op.entityId` — including
  * when `payload.id` is absent — and only warns). Here we treat the
- * authenticated `payload.id` as ground truth and fail CLOSED: an in-scope LWW op
- * whose authenticated payload does not carry a string `id` equal to
- * `op.entityId` is rejected. The gate mirrors `convertOpToAction`'s coercion
- * predicate exactly (same alias resolution, same singleton exclusion) so the two
+ * authenticated `payload.id` as ground truth for adapter-backed LWW actions and
+ * fail CLOSED: an in-scope adapter LWW op whose authenticated payload does not
+ * carry a string `id` equal to `op.entityId` is rejected. Singleton LWW actions
+ * target their registered feature state as a whole, so their contextual
+ * conflict IDs do not have a canonical payload `id`. The gate mirrors
+ * `convertOpToAction`'s action-derived storage-pattern check so the two
  * boundaries cannot drift and leave a hole.
  *
  * Scope: only encrypted ops reach this boundary (it is called from the decrypt
@@ -195,13 +198,25 @@ export const assertDecryptedOpMetadataIntegrity = (
   // reopening the retarget hole.
   const actionType = ACTION_TYPE_ALIASES[op.actionType] ?? op.actionType;
 
-  // Only non-singleton LWW single-entity updates carry a canonical `payload.id`
-  // that must equal `op.entityId`. Singletons use SINGLETON_ENTITY_ID (no `id`).
-  if (
-    !isLwwUpdateActionType(actionType) ||
-    !op.entityId ||
-    isSingletonEntityId(op.entityId)
-  ) {
+  // Today-list bulk actions are validated BEFORE the LWW-only gate below —
+  // they are ordinary action replays, not LWW updates, but their envelope ids
+  // steer conflict detection and the #9426 resolvable-multi-op paths.
+  assertEncryptedTodayListFootprintIntegrity(op, actionType, decryptedPayload);
+
+  const lwwEntityType = getLwwEntityType(actionType);
+
+  // Derive the target from actionType because it chooses the reducer branch;
+  // op.entityType is unauthenticated metadata and must not grant an exemption.
+  //
+  // Scope stays tied to the reducer: the adapter branch AND (since #9526) the
+  // array branch of lwwUpdateMetaReducer address an entity BY `payload.id`, so
+  // both can be retargeted by a tampered id and are in scope via
+  // isLwwPayloadIdCanonical. Singleton LWW replaces a whole feature slice (id
+  // irrelevant) and map LWW ops are not applied by that reducer at all — no
+  // canonical `payload.id` to protect. If the reducer ever learns to apply a
+  // map LWW update by payload identity, this gate must be widened in lockstep
+  // or the retarget defense would not cover it.
+  if (!op.entityId || !isLwwPayloadIdCanonical(lwwEntityType)) {
     return;
   }
 
@@ -303,6 +318,109 @@ const assertEncryptedProjectMoveFootprintIntegrity = (
   throw new OperationIntegrityError(
     `Operation ${op.id} failed metadata integrity check: encrypted op entityIds do ` +
       `not match the authenticated project-move footprint (possible sync-server ` +
+      `tampering). GHSA-8pxh-mgc7-gp3g`,
+  );
+};
+
+/**
+ * The Today-list bulk actions whose authenticated payload carries the task
+ * footprint as `actionPayload.taskIds`.
+ */
+const TODAY_LIST_TASK_IDS_ACTIONS: ReadonlySet<string> = new Set<string>([
+  ActionType.TASK_SHARED_PLAN_FOR_TODAY,
+  ActionType.TASK_SHARED_PLAN_DEADLINE_FOR_TODAY,
+  ActionType.TASK_SHARED_REMOVE_FROM_TODAY,
+]);
+
+/**
+ * Binds the plaintext envelope ids of a Today-list bulk op to its
+ * AES-GCM-authenticated payload footprint (#9426 hardening of the
+ * GHSA-8pxh-mgc7-gp3g class, mirroring the project-move footprint binding
+ * above).
+ *
+ * These ops replay via `actionPayload` (authenticated), so a tampered envelope
+ * cannot change WHAT is applied — but the envelope `entityId`/`entityIds`
+ * steer per-entity conflict DETECTION, the multi-entity resolvability
+ * classification, and the #9426 scoped-replacement narrowing. A compromised
+ * server could inflate a genuine encrypted plan op's `entityIds` with victim
+ * ids to manufacture conflicts (getting the victims' pending local ops
+ * LWW-rejected), or STRIP `entityIds` to make a bulk row look single-entity.
+ * Require exact-set equality between the declared envelope ids
+ * (`{entityId} ∪ entityIds`) and the authenticated footprint:
+ * `actionPayload.taskIds` for the plan/unplan actions, the
+ * `toTaskId`/`fromTaskId` pair for a Today drag.
+ *
+ * INTERIM hardening — enforceable only when the authenticated payload carries
+ * the expected footprint shape; unknown/legacy payload shapes are left
+ * untouched to avoid rejecting valid ops (same tolerance as the project-move
+ * binding). Every shipped producer of these four actions — capture from the
+ * action creators and the #9426 scoped replacements — writes the envelope ids
+ * verbatim from the payload footprint, so genuine ops always satisfy the
+ * exact-set check.
+ *
+ * @throws OperationIntegrityError when the declared envelope ids diverge from
+ *   the authenticated footprint.
+ */
+const assertEncryptedTodayListFootprintIntegrity = (
+  op: SyncOperation,
+  actionType: string,
+  decryptedPayload: unknown,
+): void => {
+  const isMoveAction = actionType === ActionType.TASK_SHARED_MOVE_IN_TODAY;
+  if (!isMoveAction && !TODAY_LIST_TASK_IDS_ACTIONS.has(actionType)) {
+    return;
+  }
+
+  const actionPayload = extractActionPayload(decryptedPayload);
+  let authenticatedIds: string[] | undefined;
+  if (isMoveAction) {
+    const toTaskId = actionPayload?.['toTaskId'];
+    const fromTaskId = actionPayload?.['fromTaskId'];
+    authenticatedIds =
+      typeof toTaskId === 'string' && typeof fromTaskId === 'string'
+        ? [toTaskId, fromTaskId]
+        : undefined;
+  } else {
+    const taskIds = actionPayload?.['taskIds'];
+    authenticatedIds = Array.isArray(taskIds)
+      ? taskIds.filter((id): id is string => typeof id === 'string')
+      : undefined;
+  }
+  if (authenticatedIds === undefined) {
+    // No authenticated footprint to bind against (unknown/legacy payload
+    // shape) — see the "INTERIM hardening" note above.
+    return;
+  }
+
+  const declaredIds = new Set<unknown>([
+    ...(op.entityId ? [op.entityId] : []),
+    ...(op.entityIds ?? []),
+  ]);
+  const authenticatedSet = new Set(authenticatedIds);
+  // Exact-set equality: no injected victim ids (inflation), no hidden ids
+  // (stripping/undercount), no non-strings.
+  const isExactSet =
+    declaredIds.size === authenticatedSet.size &&
+    [...declaredIds].every((id) => typeof id === 'string' && authenticatedSet.has(id));
+  if (isExactSet) {
+    return;
+  }
+
+  // Log ids/counts only — never payload content (op log is exportable). Rule 9.
+  SyncLog.err(
+    '[assertDecryptedOpMetadataIntegrity] encrypted op entityIds do not match the authenticated Today-list footprint — rejecting (possible sync-server tampering)',
+    {
+      opId: op.id,
+      entityType: op.entityType,
+      opEntityId: op.entityId,
+      declaredCount: declaredIds.size,
+      authenticatedCount: authenticatedSet.size,
+      actionType: op.actionType,
+    },
+  );
+  throw new OperationIntegrityError(
+    `Operation ${op.id} failed metadata integrity check: encrypted op entityIds do ` +
+      `not match the authenticated Today-list footprint (possible sync-server ` +
       `tampering). GHSA-8pxh-mgc7-gp3g`,
   );
 };

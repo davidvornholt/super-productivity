@@ -4,6 +4,7 @@ import {
 } from './verify-decrypted-op-integrity';
 import { SyncOperation } from '../sync-providers/provider.interface';
 import { OperationIntegrityError } from '../core/errors/sync-errors';
+import { ActionType } from '../core/action-types.enum';
 import { toLwwUpdateActionType } from '../core/lww-update-action-types';
 import { SINGLETON_ENTITY_ID } from '../core/entity-registry';
 import { OpType } from '../core/operation.types';
@@ -11,6 +12,7 @@ import frozen from '../validation/test-fixtures/frozen-state-v18.15.json';
 
 describe('assertDecryptedOpMetadataIntegrity', () => {
   const LWW_TASK = toLwwUpdateActionType('TASK');
+  const LWW_TIME_TRACKING = toLwwUpdateActionType('TIME_TRACKING');
 
   const createOp = (over: Partial<SyncOperation>): SyncOperation => ({
     id: 'op-1',
@@ -69,6 +71,25 @@ describe('assertDecryptedOpMetadataIntegrity', () => {
         OperationIntegrityError,
       );
     });
+
+    it('throws for an array-entity LWW op whose entityId was retargeted (#9526 lockstep)', () => {
+      // Since the reducer applies array LWW updates by payload identity,
+      // array entities are retargetable and must be in scope of the gate.
+      const op = createOp({
+        actionType: toLwwUpdateActionType('PLUGIN_USER_DATA'),
+        entityType: 'PLUGIN_USER_DATA',
+        entityId: 'victim-plugin',
+      });
+      const authenticatedPayload = {
+        actionPayload: { id: 'real-plugin', data: '{}' },
+        entityChanges: [],
+        lwwUpdateMode: 'replace',
+      };
+
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, authenticatedPayload),
+      ).toThrowError(OperationIntegrityError);
+    });
   });
 
   describe('accepts legitimate ops (no false positives)', () => {
@@ -87,8 +108,12 @@ describe('assertDecryptedOpMetadataIntegrity', () => {
       ).not.toThrow();
     });
 
-    it('ignores singleton entities (no payload.id to compare)', () => {
-      const op = createOp({ entityId: SINGLETON_ENTITY_ID });
+    it('ignores singleton LWW targets even when their conflict id is composite', () => {
+      const op = createOp({
+        actionType: LWW_TIME_TRACKING,
+        entityType: 'TIME_TRACKING',
+        entityId: 'PROJECT:project-1:2026-03-24',
+      });
       expect(() => assertDecryptedOpMetadataIntegrity(op, { foo: 'bar' })).not.toThrow();
     });
 
@@ -96,6 +121,23 @@ describe('assertDecryptedOpMetadataIntegrity', () => {
       const op = createOp({ entityId: undefined });
       expect(() =>
         assertDecryptedOpMetadataIntegrity(op, { id: 'task-123' }),
+      ).not.toThrow();
+    });
+
+    it('passes a genuine array-entity LWW op (payload.id matches entityId)', () => {
+      const op = createOp({
+        actionType: toLwwUpdateActionType('PLUGIN_USER_DATA'),
+        entityType: 'PLUGIN_USER_DATA',
+        entityId: 'sync-md',
+      });
+      const authenticatedPayload = {
+        actionPayload: { id: 'sync-md', data: '{}' },
+        entityChanges: [],
+        lwwUpdateMode: 'replace',
+      };
+
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, authenticatedPayload),
       ).not.toThrow();
     });
   });
@@ -214,6 +256,112 @@ describe('assertDecryptedOpMetadataIntegrity', () => {
       };
       expect(() =>
         assertDecryptedOpMetadataIntegrity(op, authenticatedPayload),
+      ).not.toThrow();
+    });
+  });
+
+  describe('Today-list bulk footprint binding (#9426, GHSA-8pxh)', () => {
+    const planOp = (over: Partial<SyncOperation>): SyncOperation =>
+      createOp({
+        actionType: ActionType.TASK_SHARED_PLAN_FOR_TODAY,
+        entityId: 'task-1',
+        entityIds: ['task-1', 'task-2'],
+        ...over,
+      });
+    const planPayload = (taskIds: unknown): unknown => ({
+      actionPayload: { taskIds, today: '2026-07-30' },
+      entityChanges: [],
+    });
+
+    it('throws when op.entityIds injects a victim id absent from the authenticated taskIds', () => {
+      const op = planOp({ entityIds: ['task-1', 'task-2', 'victim-task'] });
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, planPayload(['task-1', 'task-2'])),
+      ).toThrowError(OperationIntegrityError);
+    });
+
+    it('throws when the envelope is stripped to look single-entity (undercount)', () => {
+      const op = planOp({ entityIds: undefined });
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, planPayload(['task-1', 'task-2'])),
+      ).toThrowError(OperationIntegrityError);
+    });
+
+    it('throws for a bulk unplan whose envelope diverges from the authenticated taskIds', () => {
+      const op = planOp({
+        actionType: ActionType.TASK_SHARED_REMOVE_FROM_TODAY,
+        entityIds: ['task-1', 'other-task'],
+      });
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, planPayload(['task-1', 'task-2'])),
+      ).toThrowError(OperationIntegrityError);
+    });
+
+    it('throws for a Today drag whose envelope diverges from the authenticated pair', () => {
+      const op = planOp({
+        actionType: ActionType.TASK_SHARED_MOVE_IN_TODAY,
+        entityIds: ['task-1', 'victim-task'],
+      });
+      const payload = {
+        actionPayload: { toTaskId: 'task-1', fromTaskId: 'task-2' },
+        entityChanges: [],
+      };
+      expect(() => assertDecryptedOpMetadataIntegrity(op, payload)).toThrowError(
+        OperationIntegrityError,
+      );
+    });
+
+    it('passes genuine bulk ops for all four action types', () => {
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(planOp({}), planPayload(['task-1', 'task-2'])),
+      ).not.toThrow();
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(
+          planOp({ actionType: ActionType.TASK_SHARED_PLAN_DEADLINE_FOR_TODAY }),
+          planPayload(['task-1', 'task-2']),
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(
+          planOp({ actionType: ActionType.TASK_SHARED_REMOVE_FROM_TODAY }),
+          planPayload(['task-1', 'task-2']),
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(
+          planOp({ actionType: ActionType.TASK_SHARED_MOVE_IN_TODAY }),
+          {
+            actionPayload: { toTaskId: 'task-1', fromTaskId: 'task-2' },
+            entityChanges: [],
+          },
+        ),
+      ).not.toThrow();
+    });
+
+    it('passes a genuine single-task plan op (entityIds = [id])', () => {
+      const op = planOp({ entityIds: ['task-1'] });
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, planPayload(['task-1'])),
+      ).not.toThrow();
+    });
+
+    it('leaves ops without an authenticated footprint shape untouched (interim tolerance)', () => {
+      const op = planOp({ entityIds: ['task-1', 'anything'] });
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, {
+          actionPayload: { someOtherShape: true },
+          entityChanges: [],
+        }),
+      ).not.toThrow();
+    });
+
+    it('ignores out-of-scope actions that also carry taskIds (e.g. round-time)', () => {
+      const op = planOp({
+        actionType: ActionType.TASK_ROUND_TIME_SPENT,
+        entityIds: ['task-1', 'mismatched-task'],
+      });
+      expect(() =>
+        assertDecryptedOpMetadataIntegrity(op, planPayload(['task-1', 'task-2'])),
       ).not.toThrow();
     });
   });

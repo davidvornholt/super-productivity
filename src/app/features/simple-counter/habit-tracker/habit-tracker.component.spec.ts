@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { signal, WritableSignal } from '@angular/core';
 import { registerLocaleData } from '@angular/common';
 import localeSv from '@angular/common/locales/sv';
 import { HabitTrackerComponent } from './habit-tracker.component';
@@ -10,12 +11,16 @@ import { SimpleCounter, SimpleCounterType } from '../simple-counter.model';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { TranslateModule } from '@ngx-translate/core';
 import { EMPTY_SIMPLE_COUNTER } from '../simple-counter.const';
+import { GlobalTrackingIntervalService } from '../../../core/global-tracking-interval/global-tracking-interval.service';
+import { getDbDateStr } from '../../../util/get-db-date-str';
 
 describe('HabitTrackerComponent', () => {
   let component: HabitTrackerComponent;
   let fixture: ComponentFixture<HabitTrackerComponent>;
   let simpleCounterService: jasmine.SpyObj<SimpleCounterService>;
   let matDialog: jasmine.SpyObj<MatDialog>;
+  let logicalToday: Date;
+  let todayDateStr: WritableSignal<string>;
 
   const mockCounter: SimpleCounter = {
     ...EMPTY_SIMPLE_COUNTER,
@@ -39,13 +44,22 @@ describe('HabitTrackerComponent', () => {
       'deleteSimpleCounter',
     ]);
     matDialog = jasmine.createSpyObj('MatDialog', ['open']);
+    logicalToday = new Date('2026-05-18T10:00:00');
+    todayDateStr = signal(getDbDateStr(logicalToday));
 
     await TestBed.configureTestingModule({
       imports: [HabitTrackerComponent, NoopAnimationsModule, TranslateModule.forRoot()],
       providers: [
         { provide: SimpleCounterService, useValue: simpleCounterService },
         { provide: MatDialog, useValue: matDialog },
-        { provide: DateService, useValue: { todayStr: () => '2026-05-18' } },
+        {
+          provide: DateService,
+          useValue: {
+            todayStr: (date?: Date | number) => getDbDateStr(date ?? logicalToday),
+            getLogicalTodayDate: () => new Date(logicalToday),
+          },
+        },
+        { provide: GlobalTrackingIntervalService, useValue: { todayDateStr } },
         {
           provide: DateTimeFormatService,
           useValue: {
@@ -140,6 +154,32 @@ describe('HabitTrackerComponent', () => {
     }
   });
 
+  it('rolls the 7 day window over when the day changes', () => {
+    expect(component.days().map((d) => d.str)).toEqual([
+      '2026-05-12',
+      '2026-05-13',
+      '2026-05-14',
+      '2026-05-15',
+      '2026-05-16',
+      '2026-05-17',
+      '2026-05-18',
+    ]);
+
+    // midnight passes while the app stays open
+    logicalToday = new Date('2026-05-19T00:30:00');
+    todayDateStr.set(getDbDateStr(logicalToday));
+
+    expect(component.days().map((d) => d.str)).toEqual([
+      '2026-05-13',
+      '2026-05-14',
+      '2026-05-15',
+      '2026-05-16',
+      '2026-05-17',
+      '2026-05-18',
+      '2026-05-19',
+    ]);
+  });
+
   it('should not open edit dialog on long-press if day is disabled', fakeAsync(() => {
     const disabledDate = '2026-05-19'; // Tuesday (disabled in mockCounter)
     const tuesdayDow = 2;
@@ -161,6 +201,81 @@ describe('HabitTrackerComponent', () => {
 
     expect(matDialog.open).toHaveBeenCalled();
   }));
+
+  describe('onCellClick', () => {
+    const mondayDow = 1;
+    const monday = '2026-05-18';
+
+    it('toggles a simple completion habit back off when it is already checked (#9970)', () => {
+      const checked = { ...mockCounter, countOnDay: { [monday]: 1 } };
+
+      component.onCellClick(checked, monday, mondayDow);
+
+      expect(simpleCounterService.setCounterForDate).toHaveBeenCalledWith(
+        'c1',
+        monday,
+        0,
+      );
+    });
+
+    it('checks a simple completion habit that is unchecked', () => {
+      component.onCellClick(mockCounter, monday, mondayDow);
+
+      expect(simpleCounterService.setCounterForDate).toHaveBeenCalledWith(
+        'c1',
+        monday,
+        1,
+      );
+    });
+
+    // The shipped "Coffee Counter" default is a plain tally: streaks off, and the
+    // settings dialog wipes streakMinValue to undefined whenever they are off.
+    it('keeps incrementing a plain tally with streaks off and no goal', () => {
+      const tally = {
+        ...mockCounter,
+        isTrackStreaks: false,
+        streakMinValue: undefined,
+        countOnDay: { [monday]: 3 },
+      };
+
+      component.onCellClick(tally, monday, mondayDow);
+
+      expect(simpleCounterService.setCounterForDate).toHaveBeenCalledWith(
+        'c1',
+        monday,
+        4,
+      );
+    });
+
+    it('keeps incrementing a goal based habit past its goal', () => {
+      const withGoal = {
+        ...mockCounter,
+        streakMinValue: 3,
+        countOnDay: { [monday]: 3 },
+      };
+
+      component.onCellClick(withGoal, monday, mondayDow);
+
+      expect(simpleCounterService.setCounterForDate).toHaveBeenCalledWith(
+        'c1',
+        monday,
+        4,
+      );
+    });
+  });
+
+  it('shows the count for a plain tally instead of a checkmark', () => {
+    const monday = '2026-05-18';
+    const tally = {
+      ...mockCounter,
+      isTrackStreaks: false,
+      streakMinValue: undefined,
+      countOnDay: { [monday]: 3 },
+    };
+
+    expect(component.isSimpleCompletion(tally)).toBe(false);
+    expect(component.getDisplayValue(tally, monday)).toBe('3');
+  });
 
   it('should prevent default and not open dialog on context menu if day is disabled', () => {
     const event = jasmine.createSpyObj('MouseEvent', ['preventDefault']);
