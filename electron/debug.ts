@@ -98,11 +98,7 @@ export const initDebug = (
 
   if (opts.devToolsMode !== 'previous' && opts.devToolsMode) {
     devToolsOptions.mode = opts.devToolsMode as
-      | 'bottom'
-      | 'left'
-      | 'right'
-      | 'undocked'
-      | 'detach';
+      'bottom' | 'left' | 'right' | 'undocked' | 'detach';
   }
 
   app.on('browser-window-created', (event, win) => {

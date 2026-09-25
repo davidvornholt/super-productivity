@@ -506,8 +506,7 @@ describe('PluginBridgeService - request()', () => {
     expect(result).toEqual({ ok: true });
     expect(pluginHttpService.createHttpHelper).toHaveBeenCalledTimes(1);
     const getHeaders = pluginHttpService.createHttpHelper.calls.mostRecent().args[0] as
-      | (() => Record<string, string>)
-      | (() => Promise<Record<string, string>>);
+      (() => Record<string, string>) | (() => Promise<Record<string, string>>);
     await expectAsync(Promise.resolve(getHeaders())).toBeResolvedTo({});
     expect(requestSpy).toHaveBeenCalledOnceWith(
       'POST',

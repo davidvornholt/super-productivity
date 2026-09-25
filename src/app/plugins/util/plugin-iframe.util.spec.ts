@@ -53,8 +53,7 @@ describe('handlePluginMessage()', () => {
       openDialog: async (dialogCfg: { buttons?: Array<Record<string, unknown>> }) => {
         bridgedDialogCfg = dialogCfg;
         const onClick = dialogCfg.buttons?.[0].onClick as
-          | (() => Promise<void>)
-          | undefined;
+          (() => Promise<void>) | undefined;
         const clickPromise = onClick?.();
         window.dispatchEvent(
           new MessageEvent('message', {
@@ -126,8 +125,7 @@ describe('handlePluginMessage()', () => {
       createBoundMethods: () => ({}),
       openDialog: async (dialogCfg: { buttons?: Array<Record<string, unknown>> }) => {
         const onClick = dialogCfg.buttons?.[0].onClick as
-          | (() => Promise<void>)
-          | undefined;
+          (() => Promise<void>) | undefined;
         const clickPromise = onClick?.();
         window.dispatchEvent(
           new MessageEvent('message', {
@@ -189,8 +187,7 @@ describe('handlePluginMessage()', () => {
       createBoundMethods: () => ({}),
       openDialog: async (dialogCfg: { buttons?: Array<Record<string, unknown>> }) => {
         const onClick = dialogCfg.buttons?.[0].onClick as
-          | (() => Promise<unknown>)
-          | undefined;
+          (() => Promise<unknown>) | undefined;
         const clickPromise = onClick?.();
         window.dispatchEvent(
           new MessageEvent('message', {

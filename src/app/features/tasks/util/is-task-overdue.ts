@@ -34,10 +34,8 @@ export const isTaskOverdueByThreshold = (
   !!(
     // String comparison works because dueDay is YYYY-MM-DD (lexicographically
     // sortable), avoiding timezone conversion issues.
-    (
-      (task.dueDay && isDBDateStr(task.dueDay) && task.dueDay < todayStr) ||
-      (task.dueWithTime && task.dueWithTime < todayStartMs)
-    )
+    (task.dueDay && isDBDateStr(task.dueDay) && task.dueDay < todayStr) ||
+    (task.dueWithTime && task.dueWithTime < todayStartMs)
   );
 
 /**

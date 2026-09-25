@@ -824,9 +824,7 @@ export class OperationLogHydratorService {
       op.opType === OpType.Repair
     ) {
       const payload = op.payload as
-        | { appDataComplete?: unknown }
-        | RepairPayload
-        | unknown;
+        { appDataComplete?: unknown } | RepairPayload | unknown;
 
       // Check if payload has appDataComplete wrapper
       if (

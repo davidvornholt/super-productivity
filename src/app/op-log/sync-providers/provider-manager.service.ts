@@ -29,10 +29,7 @@ import { SyncEpochChangedError } from '../core/errors/sync-errors';
  * Sync status change payload type
  */
 export type SyncStatusChangePayload =
-  | 'UNKNOWN_OR_CHANGED'
-  | 'ERROR'
-  | 'IN_SYNC'
-  | 'SYNCING';
+  'UNKNOWN_OR_CHANGED' | 'ERROR' | 'IN_SYNC' | 'SYNCING';
 
 /** Payload of `providerConfigChanged$`. See that observable for the semantics. */
 export interface ProviderConfigChange {

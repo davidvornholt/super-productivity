@@ -16,12 +16,7 @@ const WAYLAND_IDLE_NOTIFY_RETRY_INTERVAL_MS = 60_000;
 const WAYLAND_IDLE_NOTIFY_DEMOTION_COOLDOWN_MS = 5 * 60_000;
 
 type IdleDetectionMethod =
-  | 'powerMonitor'
-  | 'gnomeDBus'
-  | 'waylandIdleNotify'
-  | 'xprintidle'
-  | 'loginctl'
-  | 'none';
+  'powerMonitor' | 'gnomeDBus' | 'waylandIdleNotify' | 'xprintidle' | 'loginctl' | 'none';
 
 interface EnvironmentInfo {
   readonly isWayland: boolean;

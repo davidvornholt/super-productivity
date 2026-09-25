@@ -52,11 +52,7 @@ export type ConflictJournalReason =
  * - `expired`: retention window elapsed (reserved).
  */
 export type ConflictJournalStatus =
-  | 'unreviewed'
-  | 'kept'
-  | 'flipped'
-  | 'info'
-  | 'expired';
+  'unreviewed' | 'kept' | 'flipped' | 'info' | 'expired';
 
 /**
  * One field-level diff between the two conflicting sides. Stores only the field

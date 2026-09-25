@@ -84,8 +84,7 @@ type LocalFileSyncKey = keyof GlobalConfigState['sync']['localFileSync'];
 type WebDavKey = keyof GlobalConfigState['sync']['webDav'];
 
 type ConfigPath =
-  | [GlobalConfigKey, MiscKey]
-  | [GlobalConfigKey, SyncKey, LocalFileSyncKey | WebDavKey];
+  [GlobalConfigKey, MiscKey] | [GlobalConfigKey, SyncKey, LocalFileSyncKey | WebDavKey];
 
 export const GLOBAL_CONFIG_LOCAL_ONLY_FIELDS: ConfigPath[] = [
   // ['misc', 'darkMode'],

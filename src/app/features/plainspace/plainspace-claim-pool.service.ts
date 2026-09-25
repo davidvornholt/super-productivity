@@ -94,15 +94,13 @@ export class PlainspaceClaimPoolService {
   ): Observable<PlainspaceSharedTask[]> {
     return this._plainspaceApiService.getUnclaimedTasks$(provider).pipe(
       map((issues) =>
-        issues.map(
-          (issue): PlainspaceSharedTask => ({
-            id: issue.id,
-            title: issue.title,
-            isDone: issue.isDone,
-            url: issue.url,
-            isRecurring: issue.isRecurring,
-          }),
-        ),
+        issues.map((issue): PlainspaceSharedTask => ({
+          id: issue.id,
+          title: issue.title,
+          isDone: issue.isDone,
+          url: issue.url,
+          isRecurring: issue.isRecurring,
+        })),
       ),
     );
   }

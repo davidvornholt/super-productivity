@@ -44,26 +44,22 @@ export class MentionConfigService {
       const mentions: Mentions[] = [];
       if (cfg.isEnableTag) {
         mentions.push({
-          items: tagSuggestions.map(
-            (tag): MentionListItem => ({
-              title: tag.title,
-              id: tag.id,
-              icon: tag.icon || 'label',
-              color: tag.color || tag.theme?.primary || DEFAULT_TAG_COLOR,
-              isEmoji: !!tag.icon && isSingleEmoji(tag.icon),
-            }),
-          ),
+          items: tagSuggestions.map((tag): MentionListItem => ({
+            title: tag.title,
+            id: tag.id,
+            icon: tag.icon || 'label',
+            color: tag.color || tag.theme?.primary || DEFAULT_TAG_COLOR,
+            isEmoji: !!tag.icon && isSingleEmoji(tag.icon),
+          })),
           labelKey: 'title',
           triggerChar: '#',
         });
       }
       if (cfg.isEnableDue) {
-        const chronoItems = CHRONO_SUGGESTIONS.map(
-          (title): MentionListItem => ({
-            title,
-            icon: 'schedule',
-          }),
-        );
+        const chronoItems = CHRONO_SUGGESTIONS.map((title): MentionListItem => ({
+          title,
+          icon: 'schedule',
+        }));
         mentions.push({
           items: chronoItems,
           labelKey: 'title',
@@ -71,12 +67,10 @@ export class MentionConfigService {
         });
       }
       if (cfg.isEnableDeadline) {
-        const chronoItems = CHRONO_SUGGESTIONS.map(
-          (title): MentionListItem => ({
-            title,
-            icon: 'schedule',
-          }),
-        );
+        const chronoItems = CHRONO_SUGGESTIONS.map((title): MentionListItem => ({
+          title,
+          icon: 'schedule',
+        }));
         mentions.push({
           items: chronoItems,
           labelKey: 'title',
@@ -85,15 +79,13 @@ export class MentionConfigService {
       }
       if (cfg.isEnableProject) {
         mentions.push({
-          items: projectSuggestions.map(
-            (project): MentionListItem => ({
-              title: project.title,
-              id: project.id,
-              icon: project.icon || DEFAULT_PROJECT_ICON,
-              color: project.theme?.primary || DEFAULT_PROJECT_COLOR,
-              isEmoji: !!project.icon && isSingleEmoji(project.icon),
-            }),
-          ),
+          items: projectSuggestions.map((project): MentionListItem => ({
+            title: project.title,
+            id: project.id,
+            icon: project.icon || DEFAULT_PROJECT_ICON,
+            color: project.theme?.primary || DEFAULT_PROJECT_COLOR,
+            isEmoji: !!project.icon && isSingleEmoji(project.icon),
+          })),
           labelKey: 'title',
           triggerChar: '+',
         });

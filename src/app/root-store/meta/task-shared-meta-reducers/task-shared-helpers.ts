@@ -116,14 +116,12 @@ export const removeTasksFromAllTags = (
   const tagUpdates = (state[TAG_FEATURE_NAME].ids as string[])
     .map((tagId) => state[TAG_FEATURE_NAME].entities[tagId])
     .filter((tag): tag is Tag => !!tag && tag.taskIds.some((id) => taskIdSet.has(id)))
-    .map(
-      (tag): Update<Tag> => ({
-        id: tag.id,
-        changes: {
-          taskIds: tag.taskIds.filter((id) => !taskIdSet.has(id)),
-        },
-      }),
-    );
+    .map((tag): Update<Tag> => ({
+      id: tag.id,
+      changes: {
+        taskIds: tag.taskIds.filter((id) => !taskIdSet.has(id)),
+      },
+    }));
   return updateTags(state, tagUpdates);
 };
 
@@ -147,17 +145,13 @@ export const removeTasksFromAllProjects = (
         ((project.taskIds ?? []).some((id) => taskIdSet.has(id)) ||
           (project.backlogTaskIds ?? []).some((id) => taskIdSet.has(id))),
     )
-    .map(
-      (project): Update<Project> => ({
-        id: project.id,
-        changes: {
-          taskIds: (project.taskIds ?? []).filter((id) => !taskIdSet.has(id)),
-          backlogTaskIds: (project.backlogTaskIds ?? []).filter(
-            (id) => !taskIdSet.has(id),
-          ),
-        },
-      }),
-    );
+    .map((project): Update<Project> => ({
+      id: project.id,
+      changes: {
+        taskIds: (project.taskIds ?? []).filter((id) => !taskIdSet.has(id)),
+        backlogTaskIds: (project.backlogTaskIds ?? []).filter((id) => !taskIdSet.has(id)),
+      },
+    }));
 
   if (projectUpdates.length === 0) {
     return state;

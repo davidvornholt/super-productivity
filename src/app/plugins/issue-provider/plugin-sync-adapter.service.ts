@@ -98,8 +98,7 @@ export const createPluginSyncAdapter = (
 
     getSyncConfig: (cfg: IssueProviderPluginType): FieldSyncConfig => {
       const twoWay = cfg.pluginConfig?.['twoWaySync'] as
-        | Record<string, string>
-        | undefined;
+        Record<string, string> | undefined;
       if (!twoWay) {
         return {};
       }

@@ -378,8 +378,7 @@ describe('TaskService', () => {
       service.removeMultipleTasks(['parent']);
 
       const action = (store.dispatch as jasmine.Spy).calls.mostRecent().args[0] as
-        | ReturnType<typeof TaskSharedActions.deleteTasks>
-        | undefined;
+        ReturnType<typeof TaskSharedActions.deleteTasks> | undefined;
       expect(action?.taskIds).toEqual(['parent']);
       expect(action?.tasks?.map(({ id }) => id)).toEqual(['parent', 'subtask']);
       expect(clearOneSpy.calls.allArgs()).toEqual([['parent'], ['subtask']]);

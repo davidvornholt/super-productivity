@@ -240,8 +240,7 @@ export class DialogSyncCfgComponent implements AfterViewInit {
       onClick: () => this.reauth(),
       hideExpression: (m, v, field) => {
         const id = field?.parent?.parent?.model?.syncProvider as
-          | SyncProviderId
-          | undefined;
+          SyncProviderId | undefined;
         return !id || !OAUTH_SYNC_PROVIDERS.has(id);
       },
     });
@@ -578,9 +577,7 @@ export class DialogSyncCfgComponent implements AfterViewInit {
     const oneDriveProvider = await this._providerManager.getProviderById(providerId);
     if (oneDriveProvider) {
       const existingCfg = (await oneDriveProvider.privateCfg.load()) as
-        | OneDrivePrivateCfg
-        | null
-        | undefined;
+        OneDrivePrivateCfg | null | undefined;
       const formOneDriveCfg = this._tmpUpdatedCfg.oneDrive || {};
 
       // If useCustomApp / clientId / tenantId changed, existing tokens are

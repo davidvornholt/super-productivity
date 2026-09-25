@@ -46,13 +46,7 @@ const setRepeatCycle = async (page: Page, optionLabel: RegExp): Promise<void> =>
 };
 
 type WeekdayKey =
-  | 'monday'
-  | 'tuesday'
-  | 'wednesday'
-  | 'thursday'
-  | 'friday'
-  | 'saturday'
-  | 'sunday';
+  'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
 type PersistedRepeatCfgSnapshot = {
   quickSetting: string | null;

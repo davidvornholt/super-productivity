@@ -59,9 +59,7 @@ export const planRegularOpsAfterFullStateUpload = <
 };
 
 export type UploadLastServerSeqUpdateReason =
-  | 'complete'
-  | 'has-more-with-piggyback'
-  | 'has-more-empty';
+  'complete' | 'has-more-with-piggyback' | 'has-more-empty';
 
 export interface PlanUploadLastServerSeqUpdateOptions {
   currentHighestReceivedSeq: number;

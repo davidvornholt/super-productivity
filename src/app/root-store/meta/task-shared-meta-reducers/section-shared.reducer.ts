@@ -440,8 +440,7 @@ const ACTION_HANDLERS: Record<string, Handler> = {
     if (typeof update.id !== 'string') return state;
 
     const currentTaskCandidate = state[TASK_FEATURE_NAME].entities[update.id] as
-      | Task
-      | undefined;
+      Task | undefined;
     const currentTask =
       currentTaskCandidate?.id === update.id ? currentTaskCandidate : undefined;
     // Use the AUTHENTICATED move footprint (meta.projectMoveFootprint from the encrypted
@@ -487,8 +486,7 @@ const ACTION_HANDLERS: Record<string, Handler> = {
 
     if (targetParentId) {
       const targetParentCandidate = state[TASK_FEATURE_NAME].entities[targetParentId] as
-        | Task
-        | undefined;
+        Task | undefined;
       const targetParent =
         targetParentCandidate?.id === targetParentId ? targetParentCandidate : undefined;
       targetProjectId = targetParent?.projectId ?? requestedProjectId;
@@ -520,8 +518,7 @@ const ACTION_HANDLERS: Record<string, Handler> = {
     >;
     const task = state[TASK_FEATURE_NAME].entities[taskId] as Task | undefined;
     const targetParent = state[TASK_FEATURE_NAME].entities[targetParentId] as
-      | Task
-      | undefined;
+      Task | undefined;
     if (!canApplyConvertToSubTask(task, targetParent)) {
       return state;
     }

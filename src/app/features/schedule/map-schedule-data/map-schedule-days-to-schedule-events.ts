@@ -36,8 +36,7 @@ export const mapScheduleDaysToScheduleEvents = (
     });
 
     const activeEntries: (
-      | { entry: (typeof day.entries)[number]; eventIndex: number }
-      | undefined
+      { entry: (typeof day.entries)[number]; eventIndex: number } | undefined
     )[] = [];
 
     day.entries.forEach((entry) => {

@@ -404,12 +404,10 @@ export const selectTimelineTasks = createSelector(
     return {
       planned: allPlannedTasks,
       unPlanned: taskIdsToTasks(todayIds)
-        .map(
-          (t): TaskWithSubTasks => ({
-            ...t,
-            subTasks: taskIdsToTasks(t.subTaskIds),
-          }),
-        )
+        .map((t): TaskWithSubTasks => ({
+          ...t,
+          subTasks: taskIdsToTasks(t.subTaskIds),
+        }))
         .filter((t) => !t.isDone && !allPlannedIdSet.has(t.id)),
     };
   },

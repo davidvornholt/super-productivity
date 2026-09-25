@@ -14,11 +14,7 @@ import { TaskService } from '../tasks/task.service';
 import { TaskFocusService } from '../tasks/task-focus.service';
 
 export type OnboardingStep =
-  | 'create-task'
-  | 'task-tap'
-  | 'task-swipe-left'
-  | 'task-swipe-right'
-  | 'explore';
+  'create-task' | 'task-tap' | 'task-swipe-left' | 'task-swipe-right' | 'explore';
 
 /** How long desktop and mobile onboarding steps stay visible before progressing/dismissing */
 const TASK_TAP_AUTO_ADVANCE_MS = 8000;

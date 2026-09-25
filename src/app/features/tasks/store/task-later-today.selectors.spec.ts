@@ -30,12 +30,10 @@ const runLaterToday = (
       entities[t.id] = t;
     }
   });
-  return structure.map(
-    (e): TaskWithSubTasks => ({
-      ...(entities[e.id] as Task),
-      subTasks: e.subTaskIds.map((id) => entities[id]).filter((t): t is Task => !!t),
-    }),
-  );
+  return structure.map((e): TaskWithSubTasks => ({
+    ...(entities[e.id] as Task),
+    subTasks: e.subTaskIds.map((id) => entities[id]).filter((t): t is Task => !!t),
+  }));
 };
 
 describe('selectLaterTodayTasksWithSubTasks', () => {

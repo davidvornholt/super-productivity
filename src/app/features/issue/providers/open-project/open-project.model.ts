@@ -3,9 +3,7 @@ import { BaseIssueProviderCfg } from '../../issue.model';
 import { OpenProjectOriginalStatus } from './open-project-api-responses';
 
 export type OpenProjectTransitionOption =
-  | 'ALWAYS_ASK'
-  | 'DO_NOT'
-  | OpenProjectOriginalStatus;
+  'ALWAYS_ASK' | 'DO_NOT' | OpenProjectOriginalStatus;
 
 export interface OpenProjectTransitionConfig {
   // NOTE: keys mirror IssueLocalState type
@@ -30,8 +28,7 @@ export interface OpenProjectCfg extends BaseIssueProviderCfg {
   progressOnDone?: number;
   transitionConfig?: OpenProjectTransitionConfig;
   availableTransitions?:
-    | OpenProjectOriginalStatus[]
-    | { id: string; name: string; [key: string]: unknown }[];
+    OpenProjectOriginalStatus[] | { id: string; name: string; [key: string]: unknown }[];
   /** @deprecated backwards compatibility: optional for persisted data created before this field existed */
   metadata?: { string: any };
 }

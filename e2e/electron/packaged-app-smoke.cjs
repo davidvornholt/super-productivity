@@ -191,5 +191,11 @@ run()
     process.exitCode = 1;
   })
   .finally(() => {
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+    // Chromium helpers can finish profile writes just after the parent exits.
+    fs.rmSync(userDataDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   });

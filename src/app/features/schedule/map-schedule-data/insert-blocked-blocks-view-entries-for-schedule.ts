@@ -48,7 +48,7 @@ export const insertBlockedBlocksViewEntriesForSchedule = (
       veIndex += viewEntriesToAddForBB.length;
     }
 
-    for (; veIndex < viewEntries.length; ) {
+    for (; veIndex < viewEntries.length;) {
       const viewEntry = viewEntries[veIndex];
       debug(`------------ve:${veIndex}-------------`);
       debug(

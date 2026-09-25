@@ -122,14 +122,11 @@ export class SyncHydrationService {
       };
 
       const typedDownloadedData = downloadedMainModelData as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       const downloadedArchiveYoung = typedDownloadedData?.['archiveYoung'] as
-        | ArchiveModel
-        | undefined;
+        ArchiveModel | undefined;
       const downloadedArchiveOld = typedDownloadedData?.['archiveOld'] as
-        | ArchiveModel
-        | undefined;
+        ArchiveModel | undefined;
 
       // 1. Replace downloaded archives and read the resulting snapshot under one
       // archive lock. Otherwise a local archive read-modify-write can start from

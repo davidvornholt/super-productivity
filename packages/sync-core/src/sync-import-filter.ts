@@ -2,16 +2,12 @@ import { compareVectorClocks } from './vector-clock';
 import type { VectorClock, VectorClockComparison } from './vector-clock';
 
 export type SyncImportFilterKeepReason =
-  | 'greater-than'
-  | 'equal'
-  | 'same-client-post-import'
-  | 'knows-import-counter';
+  'greater-than' | 'equal' | 'same-client-post-import' | 'knows-import-counter';
 
 export type SyncImportFilterInvalidateReason = 'concurrent' | 'less-than';
 
 export type SyncImportFilterDecisionReason =
-  | SyncImportFilterKeepReason
-  | SyncImportFilterInvalidateReason;
+  SyncImportFilterKeepReason | SyncImportFilterInvalidateReason;
 
 export interface SyncImportFilterClockSource {
   clientId: string;

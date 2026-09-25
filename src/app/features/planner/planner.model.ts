@@ -55,9 +55,7 @@ export interface ScheduleItemEvent extends ScheduleItemBase {
 }
 
 export type ScheduleItem =
-  | ScheduleItemTask
-  | ScheduleItemEvent
-  | ScheduleItemRepeatProjection;
+  ScheduleItemTask | ScheduleItemEvent | ScheduleItemRepeatProjection;
 
 export interface ScheduleItemCalendarEventData {
   title: string;

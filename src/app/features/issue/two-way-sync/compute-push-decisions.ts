@@ -2,9 +2,7 @@ import { FieldMapping, FieldMappingContext, FieldSyncConfig } from './issue-sync
 
 /** Why a `skip` decision was emitted. Stable codes that consumers can branch on. */
 export type PushDecisionSkipReason =
-  | 'direction-skip'
-  | 'no-baseline'
-  | 'provider-changed';
+  'direction-skip' | 'no-baseline' | 'provider-changed';
 
 export interface PushDecision {
   field: string;

@@ -55,8 +55,7 @@ export class DialogSimpleCounterEditSettingsComponent {
   readonly form = new UntypedFormGroup({});
   readonly formOptions: FormlyFormOptions = {};
   private readonly _fieldArray = SIMPLE_COUNTER_FORM.items?.[0]?.fieldArray as
-    | { fieldGroup?: FormlyFieldConfig[] }
-    | undefined;
+    { fieldGroup?: FormlyFieldConfig[] } | undefined;
   readonly fields: FormlyFieldConfig[] = adjustToDialogFormlyForm([
     ...(this._fieldArray?.fieldGroup ?? []),
   ]);

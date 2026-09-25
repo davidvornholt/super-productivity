@@ -58,17 +58,11 @@ describe('ArchiveService timezone test', () => {
 
       // Mock time tracking data structure
       const timeTrackingData = {
-        [todayStr]: {
-          /* today's data stays in main store */
-        },
+        [todayStr]: {/* today's data stays in main store */},
         // eslint-disable-next-line @typescript-eslint/naming-convention
-        '2025-01-15': {
-          /* older data goes to archive */
-        },
+        '2025-01-15': {/* older data goes to archive */},
         // eslint-disable-next-line @typescript-eslint/naming-convention
-        '2025-01-14': {
-          /* older data goes to archive */
-        },
+        '2025-01-14': {/* older data goes to archive */},
       };
 
       // Verify todayStr matches current date

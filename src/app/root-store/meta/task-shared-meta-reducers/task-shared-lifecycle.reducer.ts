@@ -207,14 +207,12 @@ const handleRestoreTask = (
 
   const tagUpdates = Array.from(tagTaskMap.entries())
     .filter(([tagId]) => getTagOrUndefined(state, tagId))
-    .map(
-      ([tagId, taskIds]): Update<Tag> => ({
-        id: tagId,
-        changes: {
-          taskIds: unique([...getTag(updatedState, tagId).taskIds, ...taskIds]),
-        },
-      }),
-    );
+    .map(([tagId, taskIds]): Update<Tag> => ({
+      id: tagId,
+      changes: {
+        taskIds: unique([...getTag(updatedState, tagId).taskIds, ...taskIds]),
+      },
+    }));
 
   return updateTags(updatedState, tagUpdates);
 };

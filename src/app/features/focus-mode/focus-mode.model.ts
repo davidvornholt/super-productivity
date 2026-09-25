@@ -25,9 +25,9 @@ export enum FocusScreen {
 }
 
 export enum FocusModeMode {
-  'Flowtime' = 'Flowtime',
-  'Pomodoro' = 'Pomodoro',
-  'Countdown' = 'Countdown',
+  Flowtime = 'Flowtime',
+  Pomodoro = 'Pomodoro',
+  Countdown = 'Countdown',
 }
 
 // Simplified state structure

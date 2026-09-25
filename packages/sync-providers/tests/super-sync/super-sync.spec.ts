@@ -66,10 +66,9 @@ const decompressBase64Gzip = async (base64: string): Promise<string> => {
 };
 
 type CredentialStoreMock = {
-  [K in keyof SyncCredentialStorePort<
-    typeof PROVIDER_ID_SUPER_SYNC,
-    SuperSyncPrivateCfg
-  >]: ReturnType<typeof vi.fn>;
+  [
+    K in keyof SyncCredentialStorePort<typeof PROVIDER_ID_SUPER_SYNC, SuperSyncPrivateCfg>
+  ]: ReturnType<typeof vi.fn>;
 };
 
 const createCredentialStoreMock = (): CredentialStoreMock & {

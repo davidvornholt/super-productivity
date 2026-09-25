@@ -301,8 +301,7 @@ export class IndexedDbOpLogAdapter implements OpLogDbAdapter {
     key: DbKey | DbKey[],
   ): Promise<T | undefined> {
     return (await this._database.getFromIndex(store, index, key as IDBValidKey)) as
-      | T
-      | undefined;
+      T | undefined;
   }
 
   async getKeyFromIndex(
@@ -311,8 +310,7 @@ export class IndexedDbOpLogAdapter implements OpLogDbAdapter {
     key: DbKey | DbKey[],
   ): Promise<DbKey | undefined> {
     return (await this._database.getKeyFromIndex(store, index, key as IDBValidKey)) as
-      | DbKey
-      | undefined;
+      DbKey | undefined;
   }
 
   async getAllFromIndex<T>(
