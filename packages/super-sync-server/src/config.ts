@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { isIP } from 'node:net';
 import { Logger } from './logger';
 
 /** CORS origin can be a string or RegExp for pattern matching (e.g., localhost with any port) */
@@ -70,6 +71,8 @@ export interface PrivacyConfig {
 export interface ServerConfig {
   port: number;
   host: string;
+  /** Exact reverse-proxy peer addresses; forwarded headers are ignored by default. */
+  trustedProxyAddresses?: string[];
   dataDir: string;
   /**
    * Enables the batched upload implementation in SyncService.
@@ -174,6 +177,18 @@ export const loadConfigFromEnv = (
       );
     }
     config.host = trimmedHost;
+  }
+
+  if (process.env.TRUST_PROXY_ADDRESSES !== undefined) {
+    const addresses = process.env.TRUST_PROXY_ADDRESSES.trim();
+    config.trustedProxyAddresses = addresses
+      ? addresses.split(',').map((address) => address.trim())
+      : [];
+    if (config.trustedProxyAddresses.some((address) => !isIP(address))) {
+      throw new Error(
+        'TRUST_PROXY_ADDRESSES must contain only comma-separated IP addresses.',
+      );
+    }
   }
 
   if (process.env.DATA_DIR) {

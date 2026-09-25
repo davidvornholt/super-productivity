@@ -217,6 +217,16 @@ npm start
 
 ## Configuration
 
+Reverse proxies must explicitly configure `TRUST_PROXY_ADDRESSES` with the exact
+comma-separated IPv4/IPv6 peer addresses seen by the server. Forwarded headers are
+ignored when this setting is empty (the default). Numeric hop counts, `true`,
+hostnames, and broad CIDRs are rejected. When upgrading an existing reverse-proxied
+installation, set this value before deploying the new image so client-IP rate limits
+continue to distinguish clients. For a containerized proxy, use its controlled peer
+address; if trusting a host gateway, keep the origin port bound to loopback and
+unreachable by untrusted containers. The proxy must replace untrusted forwarded
+headers. See the [Fastify security advisory](https://github.com/fastify/fastify/security/advisories/GHSA-3m5p-2c4r-xxw2).
+
 All configuration is done via environment variables.
 
 | Variable       | Default                              | Description                                                                     |

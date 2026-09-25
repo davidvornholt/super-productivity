@@ -157,10 +157,9 @@ export const createServer = (
         // Add explicit timeouts for long-running operations
         connectionTimeout: 90000, // 90s - match client timeout
         requestTimeout: 80000, // 80s - must exceed DB timeout (60s) but be less than Caddy (85s)
-        // Trust exactly one reverse proxy hop (X-Forwarded-For) so req.ip reflects
-        // the real client IP instead of the proxy's IP. Using 1 instead of true
-        // prevents attackers from spoofing IPs when no proxy is present.
-        trustProxy: 1,
+        // Only explicitly configured peers may supply forwarded request metadata.
+        // Numeric hop-only trust is unsafe and rejected by current Fastify.
+        trustProxy: fullConfig.trustedProxyAddresses ?? false,
       });
 
       // Sanitize 5xx responses so internal details (e.g. raw Prisma errors
