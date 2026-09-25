@@ -305,8 +305,7 @@ export const decryptBatch = async (
 };
 
 export type DecryptSettledItem =
-  | { ok: true; plaintext: string }
-  | { ok: false; errorName: string };
+  { ok: true; plaintext: string } | { ok: false; errorName: string };
 
 /**
  * Per-item settled variant of `decryptBatch` for failure diagnosis. Individual

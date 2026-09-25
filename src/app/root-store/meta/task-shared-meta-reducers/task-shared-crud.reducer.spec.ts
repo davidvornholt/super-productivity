@@ -1376,8 +1376,7 @@ describe('taskSharedCrudMetaReducer', () => {
         sequentialState = mockReducer.calls.mostRecent().args[0] as RootState;
       }
       const sequentialParent = sequentialState[TASK_FEATURE_NAME].entities['parent1'] as
-        | Task
-        | undefined;
+        Task | undefined;
 
       expect(bulkParent?.subTaskIds).toEqual([]);
       // Recalculating from the emptied subTaskIds instead would zero all three.

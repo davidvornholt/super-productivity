@@ -53,11 +53,7 @@ interface RemoteSyncFile {
 }
 
 type MigrationResponseLossStage =
-  | 'pending-marker'
-  | 'state'
-  | 'backup-tombstone'
-  | 'primary-tombstone'
-  | 'final-marker';
+  'pending-marker' | 'state' | 'backup-tombstone' | 'primary-tombstone' | 'final-marker';
 
 interface MigrationResponseLossScenario {
   stage: MigrationResponseLossStage;

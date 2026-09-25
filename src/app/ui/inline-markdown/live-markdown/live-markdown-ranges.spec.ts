@@ -106,9 +106,13 @@ describe('buildLiveMarkdownRanges', () => {
       const lineStarts = new Set(
         src
           .split('\n')
-          .reduce<
-            number[]
-          >((acc, line, i) => [...acc, i === 0 ? 0 : acc[i - 1] + src.split('\n')[i - 1].length + 1], []),
+          .reduce<number[]>(
+            (acc, line, i) => [
+              ...acc,
+              i === 0 ? 0 : acc[i - 1] + src.split('\n')[i - 1].length + 1,
+            ],
+            [],
+          ),
       );
       for (const range of build(src).filter((r) => r.type === 'line')) {
         expect(lineStarts.has(range.from)).toBe(true);

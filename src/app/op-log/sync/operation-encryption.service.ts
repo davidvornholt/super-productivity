@@ -50,9 +50,7 @@ export interface OperationBatchDecryptionDiagnosis {
   decryptedCount: number;
   parsedCount: number;
   passwordEvidence:
-    | 'confirmed-for-some-operations'
-    | 'no-operation-decrypted'
-    | 'not-tested';
+    'confirmed-for-some-operations' | 'no-operation-decrypted' | 'not-tested';
   failures: OperationDecryptionFailure[];
 }
 

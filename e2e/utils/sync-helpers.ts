@@ -180,10 +180,7 @@ export const setupSyncClient = async (
 export const setupClient = setupSyncClient;
 
 type TerminalSyncState =
-  | { kind: 'success' }
-  | { kind: 'conflict' }
-  | { kind: 'error'; message: string }
-  | null;
+  { kind: 'success' } | { kind: 'conflict' } | { kind: 'error'; message: string } | null;
 
 const readTerminalSyncState = async (
   page: Page,

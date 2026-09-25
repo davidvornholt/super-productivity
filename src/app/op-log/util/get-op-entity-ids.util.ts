@@ -44,8 +44,7 @@ export const getBulkArchiveTopLevelIds = (op: {
 }): string[] => {
   const payload = op.payload as { actionPayload?: unknown } | undefined;
   const actionPayload = (payload?.actionPayload ?? payload) as
-    | { tasks?: unknown }
-    | undefined;
+    { tasks?: unknown } | undefined;
   const tasks = actionPayload?.tasks;
   if (!Array.isArray(tasks)) {
     return getOpEntityIds(op);

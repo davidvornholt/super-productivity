@@ -74,7 +74,9 @@ const createSimpleCounter = async (
  * Playwright's actionability scroll brings one back into view on click.
  */
 const ensureCountersVisible = async (client: SimulatedE2EClient): Promise<void> => {
-  await (await getVisibleCounters(client))
+  await (
+    await getVisibleCounters(client)
+  )
     .first()
     .waitFor({ state: 'visible', timeout: 15000 });
 };

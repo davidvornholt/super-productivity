@@ -43,8 +43,7 @@ export class DialogKeyboardShortcutsComponent {
   // so a new shortcut shows up here without touching this component.
   readonly rows = computed<ShortcutRow[]>(() => {
     const keyboard = this._configService.cfg()?.keyboard as
-      | Record<string, string | null | undefined>
-      | undefined;
+      Record<string, string | null | undefined> | undefined;
     if (!keyboard) {
       return [];
     }

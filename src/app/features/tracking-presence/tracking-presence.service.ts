@@ -215,14 +215,12 @@ export class TrackingPresenceService implements OnDestroy {
         this._store.select(selectCurrentCycle),
       ])
         .pipe(
-          map(
-            ([taskId, isIdle, isFocusRunning, focusCycle]): LocalDerivedState => ({
-              taskId,
-              isIdle,
-              isFocusRunning,
-              focusCycle,
-            }),
-          ),
+          map(([taskId, isIdle, isFocusRunning, focusCycle]): LocalDerivedState => ({
+            taskId,
+            isIdle,
+            isFocusRunning,
+            focusCycle,
+          })),
           distinctUntilChanged(
             (a, b) =>
               a.taskId === b.taskId &&
