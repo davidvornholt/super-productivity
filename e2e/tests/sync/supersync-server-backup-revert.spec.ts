@@ -10,8 +10,8 @@ import {
   type SimulatedE2EClient,
   type TestUser,
 } from '../../utils/supersync-helpers';
-import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { readFileSync, rmSync, writeFileSync } from 'fs';
 
 /** Default encryption password used by setupSuperSync's mandatory encryption dialog */
 const ENCRYPTION_PASSWORD = 'e2e-default-encryption-pw';
@@ -55,9 +55,24 @@ const wipeUserSyncData = async (token: string): Promise<void> => {
  * Run a SQL command against the test database via docker compose exec.
  */
 const runSql = (sql: string): string => {
-  return execSync(
-    'docker compose -f docker-compose.yaml exec -T db psql -U supersync supersync_db -t -A -c ' +
-      JSON.stringify(sql),
+  return execFileSync(
+    'docker',
+    [
+      'compose',
+      '-f',
+      'docker-compose.yaml',
+      'exec',
+      '-T',
+      'db',
+      'psql',
+      '-U',
+      'supersync',
+      'supersync_db',
+      '-t',
+      '-A',
+      '-c',
+      sql,
+    ],
     { encoding: 'utf-8', timeout: 10000 },
   ).trim();
 };
@@ -107,11 +122,22 @@ const dumpUserData = (userId: number): string => {
   for (const table of USER_SYNC_TABLES) {
     // COPY ... TO STDOUT emits the standard psql text format; piping it back
     // through COPY ... FROM STDIN below round-trips the rows exactly.
-    const copyData = execSync(
-      'docker compose -f docker-compose.yaml exec -T db psql -U supersync supersync_db -c ' +
-        JSON.stringify(
-          `COPY (SELECT * FROM ${table} WHERE user_id = ${userId}) TO STDOUT`,
-        ),
+    const copyData = execFileSync(
+      'docker',
+      [
+        'compose',
+        '-f',
+        'docker-compose.yaml',
+        'exec',
+        '-T',
+        'db',
+        'psql',
+        '-U',
+        'supersync',
+        'supersync_db',
+        '-c',
+        `COPY (SELECT * FROM ${table} WHERE user_id = ${userId}) TO STDOUT`,
+      ],
       { encoding: 'utf-8', timeout: 30000 },
     );
     script += `COPY ${table} FROM STDIN;\n${copyData}\\.\n`;
@@ -127,10 +153,24 @@ const dumpUserData = (userId: number): string => {
  * user — it never touches other users' rows.
  */
 const restoreUserData = (dumpPath: string): void => {
-  execSync(
-    `cat ${dumpPath} | docker compose -f docker-compose.yaml exec -T db ` +
-      `psql -U supersync supersync_db -v ON_ERROR_STOP=1`,
+  execFileSync(
+    'docker',
+    [
+      'compose',
+      '-f',
+      'docker-compose.yaml',
+      'exec',
+      '-T',
+      'db',
+      'psql',
+      '-U',
+      'supersync',
+      'supersync_db',
+      '-v',
+      'ON_ERROR_STOP=1',
+    ],
     {
+      input: readFileSync(dumpPath),
       encoding: 'utf-8',
       timeout: 30000,
     },
@@ -142,7 +182,7 @@ const restoreUserData = (dumpPath: string): void => {
  */
 const cleanupDump = (dumpPath: string): void => {
   try {
-    execSync(`rm -f ${dumpPath}`);
+    rmSync(dumpPath, { force: true });
   } catch {
     // ignore cleanup errors
   }

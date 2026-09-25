@@ -51,8 +51,9 @@ export const parseCorsOrigin = (origin: string): CorsOrigin => {
   // Convert to safe RegExp: https://*.example.com -> /^https:\/\/[a-zA-Z0-9-]+\.example\.com$/i
   // Only allow alphanumeric and hyphens in subdomain (prevents domain confusion)
   // Normalize domain to lowercase (browsers send Origin header in lowercase per RFC 6454)
-  const escapedDomain = domain.toLowerCase().replace(/\./g, '\\.');
-  const portPart = port ? port.replace(/\./g, '\\.') : '';
+  const escapedDomain = domain.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // The validated port contains only a colon and digits; it needs no escaping.
+  const portPart = port ?? '';
   const pattern = `^${protocol}:\\/\\/[a-zA-Z0-9-]+\\.${escapedDomain}${portPart}$`;
 
   // Use case-insensitive flag to handle uppercase/lowercase variations

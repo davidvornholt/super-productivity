@@ -665,7 +665,7 @@ describe('health-alert.sh service and database monitoring', () => {
     });
 
     expect(result.mailLog).toContain('after');
-    expect(result.mailLog).not.toMatch(/[ --]/);
+    expect(result.mailLog).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
   });
 
   it.each(['', 'not-a-number', '0'])(
