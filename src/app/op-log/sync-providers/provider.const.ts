@@ -1,11 +1,11 @@
 // NOTE: do not change!!
 export enum SyncProviderId {
-  'Dropbox' = 'Dropbox',
-  'OneDrive' = 'OneDrive',
-  'WebDAV' = 'WebDAV',
-  'LocalFile' = 'LocalFile',
-  'SuperSync' = 'SuperSync',
-  'Nextcloud' = 'Nextcloud',
+  Dropbox = 'Dropbox',
+  OneDrive = 'OneDrive',
+  WebDAV = 'WebDAV',
+  LocalFile = 'LocalFile',
+  SuperSync = 'SuperSync',
+  Nextcloud = 'Nextcloud',
 }
 
 /**

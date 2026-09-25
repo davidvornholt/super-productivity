@@ -216,8 +216,7 @@ test.describe('@migration #9139 work context with no theme', () => {
 
       const state = await readMigratedState(page);
       const today = state.tag?.entities?.TODAY as
-        | { theme?: Record<string, unknown> }
-        | undefined;
+        { theme?: Record<string, unknown> } | undefined;
       expect(today).toBeDefined();
       expect(today?.theme).toBeDefined();
       expect(typeof today?.theme?.primary).toBe('string');
@@ -298,8 +297,7 @@ test.describe('@migration #9139 work context with no theme', () => {
 
       // Confirm the corruption is really on disk before relying on it.
       const corrupted = (await readMigratedState(dbPage)).tag?.entities?.TODAY as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       expect(corrupted).toBeDefined();
       expect('theme' in (corrupted as Record<string, unknown>)).toBe(false);
       await dbPage.close();

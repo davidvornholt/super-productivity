@@ -24,8 +24,7 @@ import { DEFAULT_PLAINSPACE_CFG } from '../../issue/providers/plainspace/plainsp
 
 /** What the user chose: link one of their existing spaces, or create a new one. */
 export type PlainspaceSpaceChoice =
-  | { action: 'create' }
-  | { action: 'link'; spaceId: string };
+  { action: 'create' } | { action: 'link'; spaceId: string };
 
 /**
  * Lets the user link an existing Plainspace space (so the tasks already assigned

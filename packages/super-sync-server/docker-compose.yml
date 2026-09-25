@@ -31,6 +31,7 @@ services:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=1900
       - HOST=${HOST:-0.0.0.0}
+      - TRUST_PROXY_ADDRESSES=${TRUST_PROXY_ADDRESSES:-}
       # Prisma sizes its default pool from host CPUs, not the container limit.
       # Overriding DATABASE_URL replaces these bounds; carry them across. The
       # migrator rejects missing/invalid bounds before a production deploy. A

@@ -107,18 +107,12 @@ const handleAddTask = (
   ].filter((tagId) => state[TAG_FEATURE_NAME].entities[tagId]);
 
   // Add the task to all its tags
-  const tagUpdates = tagIdsToUpdate.map(
-    (tagId): Update<Tag> => ({
-      id: tagId,
-      changes: {
-        taskIds: addTaskToList(
-          getTag(updatedState, tagId).taskIds,
-          task.id,
-          isAddToBottom,
-        ),
-      },
-    }),
-  );
+  const tagUpdates = tagIdsToUpdate.map((tagId): Update<Tag> => ({
+    id: tagId,
+    changes: {
+      taskIds: addTaskToList(getTag(updatedState, tagId).taskIds, task.id, isAddToBottom),
+    },
+  }));
 
   updatedState = updateTags(updatedState, tagUpdates);
 
@@ -246,14 +240,12 @@ const handleConvertToMainTask = (
   ].filter((tagId) => state[TAG_FEATURE_NAME].entities[tagId]);
 
   // Add the converted task to all its tags at the beginning
-  const tagUpdates = tagIdsToUpdate.map(
-    (tagId): Update<Tag> => ({
-      id: tagId,
-      changes: {
-        taskIds: positionConvertedTask(getTag(updatedState, tagId).taskIds),
-      },
-    }),
-  );
+  const tagUpdates = tagIdsToUpdate.map((tagId): Update<Tag> => ({
+    id: tagId,
+    changes: {
+      taskIds: positionConvertedTask(getTag(updatedState, tagId).taskIds),
+    },
+  }));
 
   return updateTags(updatedState, tagUpdates);
 };
@@ -266,8 +258,7 @@ const handleConvertToSubTask = (
 ): RootState => {
   const task = state[TASK_FEATURE_NAME].entities[taskId] as Task | undefined;
   const targetParent = state[TASK_FEATURE_NAME].entities[targetParentId] as
-    | Task
-    | undefined;
+    Task | undefined;
 
   // The `!task || !targetParent` checks also narrow the types below; the full
   // eligibility rule (incl. self-target and not-a-subtask) lives in the shared
@@ -877,23 +868,19 @@ const handleTagUpdates = (
     .filter((newId) => newId !== TODAY_TAG.id)
     .filter((tagId) => state[TAG_FEATURE_NAME].entities[tagId]); // Only existing tags
 
-  const removeUpdates = tagsToRemoveFrom.map(
-    (tagId): Update<Tag> => ({
-      id: tagId,
-      changes: {
-        taskIds: getTag(state, tagId).taskIds.filter((id) => id !== taskId),
-      },
-    }),
-  );
+  const removeUpdates = tagsToRemoveFrom.map((tagId): Update<Tag> => ({
+    id: tagId,
+    changes: {
+      taskIds: getTag(state, tagId).taskIds.filter((id) => id !== taskId),
+    },
+  }));
 
-  const addUpdates = tagsToAddTo.map(
-    (tagId): Update<Tag> => ({
-      id: tagId,
-      changes: {
-        taskIds: unique([taskId, ...getTag(state, tagId).taskIds]),
-      },
-    }),
-  );
+  const addUpdates = tagsToAddTo.map((tagId): Update<Tag> => ({
+    id: tagId,
+    changes: {
+      taskIds: unique([taskId, ...getTag(state, tagId).taskIds]),
+    },
+  }));
 
   return updateTags(state, [...removeUpdates, ...addUpdates]);
 };

@@ -69,11 +69,7 @@ export interface LocalSyncMetaModel {
 }
 
 export type AppBaseDataEntityLikeStates =
-  | ProjectState
-  | TaskState
-  | TaskRepeatCfgState
-  | TaskArchive
-  | SimpleCounterState;
+  ProjectState | TaskState | TaskRepeatCfgState | TaskArchive | SimpleCounterState;
 
 export interface AppDataCompleteLegacy extends AppBaseData {
   lastLocalSyncModelChange: number | null;

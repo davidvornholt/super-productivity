@@ -269,12 +269,12 @@
     "cross-env": "^10.1.0",
     "detect-it": "^4.0.1",
     "dotenv": "^17.4.2",
-    "electron": "41.4.0",
+    "electron": "41.10.7",
     "electron-builder": "^26.8.1",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-jsdoc": "63.0.10",
+    "eslint-plugin-jsdoc": "63.3.3",
     "eslint-plugin-local-rules": "^3.0.2",
     "eslint-plugin-prefer-arrow": "1.2.3",
     "eslint-plugin-prettier": "^5.5.5",
@@ -323,7 +323,7 @@
   },
   "overrides": {
     "app-builder-lib": {
-      "minimatch": "10.2.5"
+      "minimatch": "10.2.6"
     },
     "@electron/asar": {
       "minimatch": "3.1.5"
@@ -335,24 +335,24 @@
       "http-proxy-middleware": "2.0.10"
     },
     "@angular/build": {
-      "undici": "7.28.0"
+      "undici": "7.29.1"
     },
     "node-gyp": {
-      "undici": "6.27.0"
+      "undici": "6.28.1"
     },
     "sockjs": {
       "uuid": "11.1.1"
     },
     "@babel/core": "7.29.7",
-    "ws": "8.21.0"
+    "ws": "8.21.3"
   },
   "optionalDependencies": {
     "@lmdb/lmdb-darwin-x64": "^3.5.4",
     "@lmdb/lmdb-linux-x64": "^3.5.4",
     "@lmdb/lmdb-win32-x64": "^3.5.4",
-    "@rollup/rollup-darwin-x64": "4.60.2",
-    "@rollup/rollup-linux-x64-gnu": "4.60.2",
-    "@rollup/rollup-win32-x64-msvc": "4.60.2"
+    "@rollup/rollup-darwin-x64": "4.63.4",
+    "@rollup/rollup-linux-x64-gnu": "4.63.4",
+    "@rollup/rollup-win32-x64-msvc": "4.63.4"
   },
   "workspaces": [
     "packages/*"
@@ -364,9 +364,9 @@
       "owner": "johannesjo"
     }
   ],
-  "packageManager": "npm@11.18.0",
+  "packageManager": "npm@11.19.1",
   "volta": {
-    "node": "22.18.0",
-    "npm": "11.18.0"
+    "node": "22.23.3",
+    "npm": "11.19.1"
   }
 }

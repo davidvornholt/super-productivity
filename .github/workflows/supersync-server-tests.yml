@@ -9,6 +9,8 @@ on:
       - master
       - main
     paths:
+      - 'package.json'
+      - 'package-lock.json'
       - 'packages/super-sync-server/**'
       - 'packages/shared-schema/**' # @sp/shared-schema is a direct dep
       - 'packages/sync-core/**' # transitive dep via @sp/shared-schema

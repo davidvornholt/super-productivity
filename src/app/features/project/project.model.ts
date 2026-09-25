@@ -38,9 +38,6 @@ export interface ProjectCopy
 export type Project = Readonly<ProjectCopy>;
 
 export type ProjectCfgFormKey =
-  | WorkContextAdvancedCfgKey
-  | IssueProviderKey
-  | 'basic'
-  | 'theme';
+  WorkContextAdvancedCfgKey | IssueProviderKey | 'basic' | 'theme';
 
 export type ProjectState = EntityState<Project>;

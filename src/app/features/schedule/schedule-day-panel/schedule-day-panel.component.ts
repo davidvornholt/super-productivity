@@ -46,10 +46,7 @@ const OPACITY_HIDDEN = '0';
 const OPACITY_VISIBLE = '1';
 
 type DropTimeSource =
-  | 'preview-top-adjusted'
-  | 'pointer-top-adjusted'
-  | 'top-cache'
-  | 'cached';
+  'preview-top-adjusted' | 'pointer-top-adjusted' | 'top-cache' | 'cached';
 
 interface DropTimeCalculation {
   timestamp: number | null;
@@ -627,8 +624,7 @@ export class ScheduleDayPanelComponent implements AfterViewInit, OnDestroy {
 
   private _setPreviewWidth(previewEl: HTMLElement): void {
     const containerElement = this.scheduleWeekRef?.nativeElement as
-      | HTMLElement
-      | undefined;
+      HTMLElement | undefined;
     const day = this._targetDay();
 
     if (!containerElement || !day) {

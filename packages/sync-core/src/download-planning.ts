@@ -23,9 +23,7 @@ export const planDownloadGapReset = ({
 });
 
 export type DownloadFullStateUploadReason =
-  | 'gap-empty-server'
-  | 'empty-server-with-synced-ops'
-  | 'none';
+  'gap-empty-server' | 'empty-server-with-synced-ops' | 'none';
 
 export interface PlanDownloadFullStateUploadOptions {
   currentNeedsFullStateUpload: boolean;

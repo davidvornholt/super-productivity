@@ -21,8 +21,7 @@ type ValidationIssue = {
 };
 
 type SafeParseResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: { issues: ValidationIssue[] } };
+  { success: true; data: T } | { success: false; error: { issues: ValidationIssue[] } };
 
 type SafeParseSchema<T> = {
   safeParse: (data: unknown) => SafeParseResult<T>;

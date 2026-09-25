@@ -40,8 +40,7 @@ const _getSafePluginConfigString = (
     ([k]) => !SECRET_KEY_PATTERNS.test(k),
   );
   return safeEntries.find(([, v]) => typeof v === 'string' && v.length > 0)?.[1] as
-    | string
-    | undefined;
+    string | undefined;
 };
 
 export const getIssueProviderTooltip = (issueProvider: IssueProvider): string => {

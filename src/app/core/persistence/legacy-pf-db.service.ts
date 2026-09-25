@@ -329,8 +329,7 @@ export class LegacyPfDbService {
 
       // Check for existing lock
       const existingLock = (await db.get(STORE_NAME, MIGRATION_LOCK_KEY)) as
-        | MigrationLock
-        | undefined;
+        MigrationLock | undefined;
 
       if (existingLock) {
         // Check if lock is expired
@@ -364,8 +363,7 @@ export class LegacyPfDbService {
     try {
       const db = await this._openDb();
       const existingLock = (await db.get(STORE_NAME, MIGRATION_LOCK_KEY)) as
-        | MigrationLock
-        | undefined;
+        MigrationLock | undefined;
 
       // Only release if we own the lock
       if (existingLock && existingLock.tabId === this._tabId) {

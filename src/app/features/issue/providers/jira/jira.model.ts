@@ -3,10 +3,7 @@ import { BaseIssueProviderCfg } from '../../issue.model';
 
 // TODO this needs to be addressed to be either string or JiraOriginalTransition, but not both
 export type JiraTransitionOption =
-  | 'ALWAYS_ASK'
-  | 'DO_NOT'
-  | JiraOriginalTransition
-  | string;
+  'ALWAYS_ASK' | 'DO_NOT' | JiraOriginalTransition | string;
 
 export enum JiraWorklogExportDefaultTime {
   AllTime = 'AllTime',

@@ -154,8 +154,7 @@ export interface FileSnapshotOpDownloadResponse extends OpDownloadResponseBase {
 }
 
 export type OpDownloadResponse =
-  | SuperSyncOpDownloadResponse
-  | FileSnapshotOpDownloadResponse;
+  SuperSyncOpDownloadResponse | FileSnapshotOpDownloadResponse;
 
 export type OpDownloadResponseForMode<M extends OperationSyncProviderMode> =
   M extends 'fileSnapshotOps'

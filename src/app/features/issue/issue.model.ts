@@ -52,21 +52,14 @@ export type BuiltInIssueProviderKey =
 
 // Keys migrated from built-in to plugin — still valid as IssueProviderKey
 export type MigratedIssueProviderKey =
-  | 'GITHUB'
-  | 'CLICKUP'
-  | 'GITEA'
-  | 'LINEAR'
-  | 'TRELLO'
-  | 'AZURE_DEVOPS';
+  'GITHUB' | 'CLICKUP' | 'GITEA' | 'LINEAR' | 'TRELLO' | 'AZURE_DEVOPS';
 
 // Plugin issue provider keys use a 'plugin:' prefix to avoid collision
 export type PluginIssueProviderKey = `plugin:${string}`;
 
 // Combined type — preserves autocomplete for built-in keys
 export type IssueProviderKey =
-  | BuiltInIssueProviderKey
-  | MigratedIssueProviderKey
-  | PluginIssueProviderKey;
+  BuiltInIssueProviderKey | MigratedIssueProviderKey | PluginIssueProviderKey;
 
 export const isPluginIssueProvider = (
   key: IssueProviderKey,

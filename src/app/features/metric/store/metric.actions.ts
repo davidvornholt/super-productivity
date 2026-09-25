@@ -5,11 +5,11 @@ import { PersistentActionMeta } from '../../../op-log/core/persistent-action.int
 import { OpType } from '../../../op-log/core/operation.types';
 
 enum MetricActionTypes {
-  'AddMetric' = '[Metric] Add Metric',
-  'UpdateMetric' = '[Metric] Update Metric',
-  'UpsertMetric' = '[Metric] Upsert Metric',
-  'DeleteMetric' = '[Metric] Delete Metric',
-  'LogFocusSession' = '[Metric] Log Focus Session',
+  AddMetric = '[Metric] Add Metric',
+  UpdateMetric = '[Metric] Update Metric',
+  UpsertMetric = '[Metric] Upsert Metric',
+  DeleteMetric = '[Metric] Delete Metric',
+  LogFocusSession = '[Metric] Log Focus Session',
 }
 
 export const addMetric = createAction(

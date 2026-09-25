@@ -16,8 +16,7 @@ import { alertDialog, confirmDialog } from '../../util/native-dialogs';
 import { recordCriticalErrorTime } from '../../util/critical-error-signal';
 
 let _validateFullPromise:
-  | Promise<typeof import('./validation-fn').validateFull>
-  | undefined;
+  Promise<typeof import('./validation-fn').validateFull> | undefined;
 const _loadValidateFull = (): Promise<typeof import('./validation-fn').validateFull> => {
   if (!_validateFullPromise) {
     _validateFullPromise = import('./validation-fn')

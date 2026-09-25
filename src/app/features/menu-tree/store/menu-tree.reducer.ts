@@ -133,8 +133,7 @@ export const menuTreeReducer = createReducer(
     const stored =
       appDataComplete && typeof appDataComplete === 'object'
         ? ((appDataComplete as Record<string, unknown>).menuTree as
-            | MenuTreeState
-            | undefined)
+            MenuTreeState | undefined)
         : undefined;
     if (!stored) {
       return menuTreeInitialState;

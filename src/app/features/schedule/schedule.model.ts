@@ -66,8 +66,7 @@ export interface SVERepeatProjectionSplit extends SVERepeatProjectionBase {
 
 export interface SVERepeatProjectionSplitContinued extends SVERepeatProjectionBase {
   type:
-    | SVEType.RepeatProjectionSplitContinued
-    | SVEType.RepeatProjectionSplitContinuedLast;
+    SVEType.RepeatProjectionSplitContinued | SVEType.RepeatProjectionSplitContinuedLast;
   splitIndex: number;
 }
 

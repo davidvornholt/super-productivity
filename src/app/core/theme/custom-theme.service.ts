@@ -33,8 +33,7 @@ export interface CustomTheme {
 
 /** Reference to a theme stored as `kind:id` in `LS.CUSTOM_THEME`. */
 export type CustomThemeRef =
-  | { kind: 'builtin'; id: string }
-  | { kind: 'user'; id: string };
+  { kind: 'builtin'; id: string } | { kind: 'user'; id: string };
 
 const STYLESHEET_ID = 'custom-theme-stylesheet';
 
@@ -221,15 +220,13 @@ export class CustomThemeService {
   /** All themes available in the picker — built-ins first, then user uploads. */
   readonly themes: Signal<CustomTheme[]> = computed(() => [
     ...BUILT_IN_THEMES,
-    ...this._themeStorage.themes().map(
-      (t): CustomTheme => ({
-        id: t.id,
-        name: t.name,
-        kind: 'user',
-        requiredMode: 'system',
-        warnings: t.warnings,
-      }),
-    ),
+    ...this._themeStorage.themes().map((t): CustomTheme => ({
+      id: t.id,
+      name: t.name,
+      kind: 'user',
+      requiredMode: 'system',
+      warnings: t.warnings,
+    })),
   ]);
 
   /** Apply the currently-selected theme during startup. */

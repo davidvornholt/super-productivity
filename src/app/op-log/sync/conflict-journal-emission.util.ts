@@ -75,8 +75,7 @@ const extractEntityTitle = (
   }
   for (const op of ops) {
     const entity = extractEntityFromPayload(op.payload, payloadKey, entityId) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     const isMultiEntityOp = isMultiEntityOperation(op);
     if (!isMultiEntityOp || entity?.['id'] === entityId) {
       const title = firstString(entity?.['title'], entity?.['name']);

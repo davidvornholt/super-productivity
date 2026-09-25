@@ -8,9 +8,7 @@ export enum MenuTreeKind {
 }
 
 export type MenuTreeNodeKind =
-  | MenuTreeKind.FOLDER
-  | MenuTreeKind.PROJECT
-  | MenuTreeKind.TAG;
+  MenuTreeKind.FOLDER | MenuTreeKind.PROJECT | MenuTreeKind.TAG;
 
 export interface MenuTreeState {
   projectTree: MenuTreeTreeNode[];
@@ -43,9 +41,7 @@ export type MenuTreeTreeNode = MenuTreeFolderNode | MenuTreeProjectNode | MenuTr
 // View model used by the navigation to render tree nodes with hydrated data
 // -----------------------------------------------------------
 export type MenuTreeViewNode =
-  | MenuTreeViewFolderNode
-  | MenuTreeViewProjectNode
-  | MenuTreeViewTagNode;
+  MenuTreeViewFolderNode | MenuTreeViewProjectNode | MenuTreeViewTagNode;
 
 export interface MenuTreeViewFolderNode {
   k: MenuTreeKind.FOLDER;

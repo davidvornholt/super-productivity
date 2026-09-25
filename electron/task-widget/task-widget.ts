@@ -168,8 +168,7 @@ const createTaskWidgetWindowForGeneration = async (
     const store = await loadSimpleStoreAll();
     // Try new key first, fall back to legacy key for migration
     const saved = (store[TASK_WIDGET_BOUNDS_KEY] || store[LEGACY_BOUNDS_KEY]) as
-      | { width: number; height: number; x: number; y: number }
-      | undefined;
+      { width: number; height: number; x: number; y: number } | undefined;
     if (
       saved &&
       typeof saved.width === 'number' &&

@@ -32,12 +32,7 @@ export const getDailyStateInfo = (
   const isExtendedFocus = focusMinutes >= 150;
 
   let stateKey:
-    | 'DEEP_FLOW'
-    | 'STEADY'
-    | 'OVERDRIVE'
-    | 'RECOVERY'
-    | 'IMPACT_MISMATCH'
-    | 'DRIFT';
+    'DEEP_FLOW' | 'STEADY' | 'OVERDRIVE' | 'RECOVERY' | 'IMPACT_MISMATCH' | 'DRIFT';
 
   if (isHighSustainability && isLowImpact && isExtendedFocus) {
     stateKey = 'IMPACT_MISMATCH';

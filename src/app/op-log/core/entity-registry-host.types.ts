@@ -33,9 +33,7 @@ export interface EntityAdapterLike<TEntity = unknown, TState = unknown> {
 }
 
 export type SelectById =
-  | StateSelector
-  | PropsStateSelector<{ id: string }>
-  | SelectByIdFactory;
+  StateSelector | PropsStateSelector<{ id: string }> | SelectByIdFactory;
 
 /**
  * NgRx-flavoured fields the host attaches to `EntityConfig`. None of these

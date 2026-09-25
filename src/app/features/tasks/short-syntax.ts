@@ -22,12 +22,7 @@ type TagChanges = {
 };
 
 export type ShortSyntaxTokenType =
-  | 'due'
-  | 'deadline'
-  | 'estimate'
-  | 'tag'
-  | 'project'
-  | 'url';
+  'due' | 'deadline' | 'estimate' | 'tag' | 'project' | 'url';
 
 // A span of the *raw* input consumed by a parse stage, e.g. '@every friday',
 // '#home', '+work', '30m/1h'. Used to highlight detected syntax in the input.
@@ -567,12 +562,10 @@ const parseTagChanges = (
 
       if (mode === 'replace') {
         // Check if arrays arent the same
-        if (
-          !(
-            task.tagIds.length === matchingTagIds.length &&
-            task.tagIds.every((val, i) => val === matchingTagIds[i])
-          )
-        ) {
+        if (!(
+          task.tagIds.length === matchingTagIds.length &&
+          task.tagIds.every((val, i) => val === matchingTagIds[i])
+        )) {
           taskChanges.tagIds = matchingTagIds;
         }
       } else {

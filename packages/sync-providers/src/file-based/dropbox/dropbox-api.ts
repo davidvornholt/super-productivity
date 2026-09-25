@@ -74,9 +74,7 @@ interface DropboxErrorResponse {
  * @see https://www.dropbox.com/developers/documentation/http/documentation#files-upload
  */
 type DropboxWriteMode =
-  | { '.tag': 'add' }
-  | { '.tag': 'overwrite' }
-  | { '.tag': 'update'; update: string };
+  { '.tag': 'add' } | { '.tag': 'overwrite' } | { '.tag': 'update'; update: string };
 
 /** Timeout for data transfer requests (uploads/downloads) — 120s */
 const NATIVE_REQUEST_READ_TIMEOUT = 120000;

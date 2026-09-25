@@ -832,8 +832,7 @@ export const lwwUpdateMetaReducer: MetaReducer = (
       // rather than applied.
       if (newParentId) {
         const parentCandidate = updatedState[TASK_FEATURE_NAME].entities[newParentId] as
-          | Task
-          | undefined;
+          Task | undefined;
         const parent = parentCandidate?.id === newParentId ? parentCandidate : undefined;
         if (parent && parent.projectId !== newProjectId) {
           newProjectId = parent.projectId;

@@ -18,8 +18,7 @@ import {
 import { AppDataComplete, MODEL_CONFIGS } from '../model/model-config';
 
 let _validateAllDataPromise:
-  | Promise<typeof import('../validation/validation-fn').validateAllData>
-  | undefined;
+  Promise<typeof import('../validation/validation-fn').validateAllData> | undefined;
 
 const _loadValidateAllData = (): Promise<
   typeof import('../validation/validation-fn').validateAllData

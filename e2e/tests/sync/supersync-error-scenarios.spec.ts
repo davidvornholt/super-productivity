@@ -53,8 +53,7 @@ const areLocalOperationsSynced = (page: Page, operationIds: string[]): Promise<b
                 getRequest.onsuccess = (): void =>
                   resolve(
                     getRequest.result as
-                      | { syncedAt?: number; rejectedAt?: number }
-                      | undefined,
+                      { syncedAt?: number; rejectedAt?: number } | undefined,
                   );
                 getRequest.onerror = (): void => reject(getRequest.error);
               },

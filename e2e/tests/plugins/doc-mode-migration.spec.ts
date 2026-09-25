@@ -135,8 +135,7 @@ test.describe('Doc Mode Stage A migration', () => {
         const helpers = (window as unknown as { __e2eTestHelpers?: { store?: unknown } })
           .__e2eTestHelpers;
         const store = helpers?.store as
-          | { dispatch: (action: unknown) => void }
-          | undefined;
+          { dispatch: (action: unknown) => void } | undefined;
         if (!store) {
           throw new Error('__e2eTestHelpers.store not exposed — non-dev build?');
         }

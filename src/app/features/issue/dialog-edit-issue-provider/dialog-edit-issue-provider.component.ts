@@ -558,8 +558,7 @@ export class DialogEditIssueProviderComponent {
     }
     const defaultPluginConfig = this._getDefaultPluginConfig();
     const defaultTwoWaySync = defaultPluginConfig['twoWaySync'] as
-      | Record<string, PluginSyncDirection>
-      | undefined;
+      Record<string, PluginSyncDirection> | undefined;
     if (defaultTwoWaySync) {
       const provider = this._pluginRegistry.getProvider(this.issueProviderKey);
       const isPushSupported = !!provider?.definition.updateIssue;
