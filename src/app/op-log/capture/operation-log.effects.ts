@@ -17,6 +17,7 @@ import { uuidv7 } from '../../util/uuid-v7';
 import { devError } from '../../util/dev-error';
 import { incrementVectorClock } from '../../core/util/vector-clock';
 import { MultiEntityPayload, Operation, ActionType } from '../core/operation.types';
+import { KNOWN_ACTION_TYPES } from '../core/action-types.enum';
 import { OperationLogCompactionService } from '../persistence/operation-log-compaction.service';
 import { OpLog } from '../../core/log';
 import { SnackService } from '../../core/snack/snack.service';
@@ -37,13 +38,12 @@ import {
   isDeferredAction,
 } from './operation-capture.meta-reducer';
 import { ClientIdService } from '../../core/util/client-id.service';
+import { isReducerRejectedAction } from '../../root-store/meta/reducer-failure-guard.meta-reducer';
 import { SuperSyncStatusService } from '../sync/super-sync-status.service';
 
 interface WriteOperationOptions {
   callerHoldsOperationLogLock?: boolean;
 }
-
-const KNOWN_ACTION_TYPES: ReadonlySet<string> = new Set(Object.values(ActionType));
 
 /**
  * NgRx Effects for persisting application state changes as operations to the
@@ -100,6 +100,9 @@ export class OperationLogEffects implements DeferredLocalActionsPort {
    * 1. Non-persistent actions (actions without PersistentActionMeta)
    * 2. Remote actions (actions replayed from sync, marked with isRemote: true)
    * 3. Deferred actions (buffered during sync, processed later by processDeferredActions)
+   * 4. Rejected actions (reducer threw, #10195): no state change happened, so
+   *    no operation may be built from the payload — and the meta-reducer never
+   *    incremented the pending counter for them, so decrementing would underflow.
    *
    * Note: We do NOT filter by `isApplyingRemoteOps()` here because of a race
    * condition: the meta-reducer may capture (increment the pending counter for)
@@ -118,7 +121,8 @@ export class OperationLogEffects implements DeferredLocalActionsPort {
           (action): action is PersistentAction =>
             isPersistentAction(action) &&
             !action.meta.isRemote &&
-            !isDeferredAction(action),
+            !isDeferredAction(action) &&
+            !isReducerRejectedAction(action),
         ),
         // concatMap for sequential, ordered processing (one write at a time).
         concatMap((action) => this.writeOperationFromEffect(action)),

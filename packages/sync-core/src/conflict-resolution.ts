@@ -162,6 +162,21 @@ export const convertLocalDeleteRemoteUpdatesToLww = <
       const updateChanges = existingLwwPayload
         ? extractActionPayload(existingLwwPayload)
         : extractUpdateChanges(remoteOp.payload, remotePayloadKey, conflict.entityId);
+      // NOTE (#9256): this still classifies "is a singleton" by `entityId === '*'`,
+      // the same conflation the host fixed by switching to a storage-pattern check
+      // (see isLwwPayloadIdCanonical). A singleton with a COMPOSITE conflict id
+      // (e.g. TIME_TRACKING) would fall into the else branch and get `id` injected
+      // into its whole-slice payload — and the host's LWW reducer would then
+      // replace the WHOLE feature slice with that merged shape.
+      //
+      // Unreachable today, but NOT because "singletons never emit deletes": they
+      // do — menuTreeDeleteFolder emits MENU_TREE + OpType.Delete with a folderId
+      // entityId. The actual guard is `baseEntity` above: extractEntityFromPayload
+      // finds nothing in that delete payload (no `menuTree` key, no id-matching
+      // array element, no top-level `id` — the field is named `folderId`), so this
+      // branch is skipped. That means renaming such a payload field to `id`, or
+      // adding a singleton delete that carries its entity, ARMS this line. Migrate
+      // to a storage-pattern predicate before either happens.
       const mergedEntity = options.isSingletonEntityId?.(conflict.entityId)
         ? { ...baseEntity, ...updateChanges }
         : { ...baseEntity, ...updateChanges, id: conflict.entityId };
@@ -208,6 +223,20 @@ const deepEqualInner = (
   if (typeof a !== typeof b) return false;
 
   if (typeof a === 'object') {
+    // `seen` tracks the objects on the CURRENT path, not everything visited, so
+    // it must be unwound on the way back up. A shared sub-object referenced
+    // twice (a DAG, not a cycle) is legitimate — `structuredClone` preserves
+    // aliasing and module-level defaults are routinely aliased — and leaving it
+    // in `seen` made the second visit bail as "circular", so two structurally
+    // identical values compared unequal. A real cycle revisits an ANCESTOR,
+    // which is still on the path, so it is still caught.
+    //
+    // shortcut: unwinding also drops the incidental memoisation, so a heavily
+    // aliased DAG is re-walked per reference (measured: fan-out 6 x depth 8 =
+    // 1.7M visits, ~530ms). No caller is anywhere near that — payloads arrive
+    // as JSON (pure trees, no aliasing) and the aliased inputs are small
+    // module-level config defaults — so this stays unguarded. If one ever is,
+    // add a proven-equal pair cache rather than reverting to a visited set.
     if (seen.has(a as object) || seen.has(b as object)) {
       logger.warn('sync-core.deepEqual detected circular reference, returning false');
       return false;
@@ -215,27 +244,32 @@ const deepEqualInner = (
     seen.add(a as object);
     seen.add(b as object);
 
-    if (Array.isArray(a) && Array.isArray(b)) {
-      if (a.length !== b.length) return false;
-      return a.every((val, i) =>
-        deepEqualInner(val, b[i], logger, maxDepth, seen, depth + 1),
+    try {
+      if (Array.isArray(a) && Array.isArray(b)) {
+        if (a.length !== b.length) return false;
+        return a.every((val, i) =>
+          deepEqualInner(val, b[i], logger, maxDepth, seen, depth + 1),
+        );
+      }
+
+      if (Array.isArray(a) !== Array.isArray(b)) return false;
+
+      const aRecord = a as Record<string, unknown>;
+      const bRecord = b as Record<string, unknown>;
+      const aKeys = Object.keys(aRecord);
+      const bKeys = Object.keys(bRecord);
+      if (aKeys.length !== bKeys.length) return false;
+      if (!aKeys.every((key) => Object.prototype.hasOwnProperty.call(bRecord, key))) {
+        return false;
+      }
+
+      return aKeys.every((key) =>
+        deepEqualInner(aRecord[key], bRecord[key], logger, maxDepth, seen, depth + 1),
       );
+    } finally {
+      seen.delete(a as object);
+      seen.delete(b as object);
     }
-
-    if (Array.isArray(a) !== Array.isArray(b)) return false;
-
-    const aRecord = a as Record<string, unknown>;
-    const bRecord = b as Record<string, unknown>;
-    const aKeys = Object.keys(aRecord);
-    const bKeys = Object.keys(bRecord);
-    if (aKeys.length !== bKeys.length) return false;
-    if (!aKeys.every((key) => Object.prototype.hasOwnProperty.call(bRecord, key))) {
-      return false;
-    }
-
-    return aKeys.every((key) =>
-      deepEqualInner(aRecord[key], bRecord[key], logger, maxDepth, seen, depth + 1),
-    );
   }
 
   return false;

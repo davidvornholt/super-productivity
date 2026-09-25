@@ -34,9 +34,11 @@ applied as one `bulkApplyOperations` action; `LOCAL_ACTIONS` ensures your effect
 only sees genuine local user intent.
 
 - Default for **all** effects: `private _actions$ = inject(LOCAL_ACTIONS);`
-- The only legitimate exception uses `ALL_ACTIONS` and handles `isRemote`
-  itself: `operation-log.effects.ts` (captures/persists every action). You are
-  almost certainly not adding a second.
+- The only legitimate exceptions use `ALL_ACTIONS`: `operation-log.effects.ts`
+  (captures/persists every action, handles `isRemote` itself) and
+  `reducer-failure-snack.effects.ts` (surfaces rejected actions, which
+  `LOCAL_ACTIONS` hides by design, #10195). You are almost certainly not adding
+  a third.
 - Remote **archive** side effects are _not_ an `ALL_ACTIONS` case:
   `archive-operation-handler.effects.ts` itself uses `LOCAL_ACTIONS`; the
   remote-client archive writes/deletes are driven separately by
@@ -46,9 +48,41 @@ only sees genuine local user intent.
 wrong; the linter rejects `inject(Actions)` / `Actions` imports in
 `*.effects.ts`.
 
+**A reducer throw on a local action is boxed, marked, not captured, and not
+fed to `LOCAL_ACTIONS` (#10195).** `reducerFailureGuardMetaReducer` (index 0 of
+`META_REDUCERS`) catches the throw, returns the previous state, marks the
+action instance rejected, and reports via `devError`. Without it the throw
+escapes the NgRx `State` scan and silently freezes the store: every later
+dispatch — including bulk-applied remote ops the op log already marks applied —
+is dropped until restart. Capture builds operations from action payloads, so
+`persistOperation$` and `LOCAL_ACTIONS` both skip rejected actions
+(`isReducerRejectedAction`): no op is uploaded for a state change that never
+happened, and no `ofType` effect runs side effects for it. Nothing is retried;
+the user sees an error and state stays consistent. Do not rely on the box as a
+correctness tool — a reducer that can throw on a stale UI-held id
+(`getTaskById` after a remote archive) should still guard and return state.
+
+Because the app now survives that throw, **a meta-reducer that writes
+module-level state must commit it last — after the inner reducer and anything
+else that can throw, `devError` included (it throws in dev builds when
+confirmed).** Writing first leaves the module describing a rejected action:
+`undoTaskDeleteMetaReducer` once captured `lastDeletePayload` before the delete
+reducer, so a rejected delete made an open undo snack restore a task that was
+never deleted — a synced write.
+
+**The reducer-side mirror: a reducer handling a _non-persistent_ action must
+not write synced entity fields.** Capture builds operations from action
+payloads, not from state diffs, so such a write never becomes an op — the local
+device drifts from every other device with no conflict to detect, and
+`getPhantomChangeRisk()` cannot see it either. Not lint-enforced. If a
+UI-pointer action (`setCurrentTask`, `setSelectedTask`, …) needs to change task
+data, dispatch a persistent action from a `LOCAL_ACTIONS` effect instead
+(`TaskInternalEffects.reopenStartedDoneTask$`, #9904).
+
 ## Boundary 2 — The selector boundary
 
-**Selector-driven effects must guard with `skipDuringSyncWindow()`.**
+**Selector-driven mutating effects must guard the sync window. Choose whether
+the source may be dropped or must be deferred.**
 
 An effect that reacts to a _selector_ (store state) instead of a specific
 _action_ bypasses Boundary 1 entirely — it fires on every store change,
@@ -56,8 +90,51 @@ including hydration and sync replay. Two timing gaps (initial startup before
 first sync; the post-sync re-evaluation window) make such effects emit
 operations with stale vector clocks that immediately conflict.
 
-- Use `skipDuringSyncWindow()` for selector-based effects that modify
-  frequently-synced entities or perform "repair"/"consistency" work.
+- Use `skipDuringSyncWindow()` only for a **level/repeating** source whose next
+  emission safely retries the work. It deliberately drops emissions.
+- Use `waitForSyncWindow()` for a **sparse or edge-triggered** source when a
+  dropped emission cannot be recovered. A store selector normally ends in
+  `distinctUntilChanged()`, so the value that changed during sync may never
+  re-emit after the window closes.
+- **`waitForSyncWindow()` does not gate initial sync.** It observes only
+  `HydrationStateService.isInSyncWindow()`, so it passes immediately when that
+  window is closed even if the initial-sync gate has not opened.
+  `skipDuringSyncWindow()` is different: it also checks
+  `SyncTriggerService.isInitialSyncDoneSync()`. A sparse mutating effect that
+  must wait for startup sync therefore needs both gates:
+
+  ```typescript
+  return this._syncTriggerService.afterInitialSyncDoneStrict$.pipe(
+    first(),
+    switchMap(() =>
+      sparseSource$.pipe(
+        // Capture all state required by the edge before deferring it.
+        map((edge) => captureRequiredState(edge)),
+        waitForSyncWindow(this._hydrationState, 'MyEffects:mutatingEffect$'),
+        // ...perform the mutation
+      ),
+    ),
+  );
+  ```
+
+  This is the established composition used by
+  `TaskDueEffects.createRepeatableTasksAndAddDueToday$` and
+  `TaskRepeatCleanupEffects.cleanupDuplicateRepeatInstances$`. Use
+  `afterInitialSyncDoneAndDataLoadedInitially$` instead only when its
+  non-strict UI-readiness semantics are intentional; neither gate is proof
+  stronger than the failsafes documented by `SyncTriggerService`.
+
+- Before waiting, combine/map the edge with every piece of state needed to
+  handle it. Process that captured snapshot after the window closes; do not
+  wait and then reconstruct an already-passed edge from unrelated live state.
+  `waitForSyncWindow()` keeps only the latest pending value, so it is not the
+  right operator when every individual emission must be preserved.
+- `waitForSyncWindow()` is fail-open after 30 seconds: it logs the timeout and
+  emits even if the sync window is still active. It prevents a sparse trigger
+  from being lost during ordinary short syncs, but it is **not** a hard
+  mutual-exclusion boundary. If a mutation must never overlap replay, prefer a
+  `LOCAL_ACTIONS`-driven effect or redesign it around a fail-closed boundary
+  rather than relying on this operator.
 - The narrower `skipWhileApplyingRemoteOps()` /
   `HydrationStateService.isApplyingRemoteOps()` exist for finer control.
 - **Prefer action-based effects.** A selector-based effect is the
@@ -99,14 +176,55 @@ blessed pattern is a `task-shared-meta-reducers/` reducer.
 
 ---
 
+## Clearing a field — `undefined` does not survive the wire (#9776)
+
+**Never rely on `changes: { someField: undefined }` reaching another device.**
+`JSON.stringify` drops undefined-valued keys from the op payload (SuperSync
+HTTP/E2EE, file-based providers, the SQLite op-log — everything except the
+IndexedDB structured clone), so a reducer that applies `changes` verbatim
+replays the clear as a no-op remotely. The local device looks correct, which is
+exactly why this class of bug survives testing.
+
+Safe patterns, in order of preference:
+
+1. **Set the `undefined` inside a reducer/meta-reducer** keyed off a dedicated
+   action whose payload carries only ids (e.g.
+   `TaskSharedActions.dismissReminderOnly` → `remindAt: undefined` in the
+   reducer). Deterministic on replay; nothing to serialize.
+2. **Rebuild `changes` from destructured payload fields** — a dropped key
+   destructures back to `undefined` identically (e.g. `scheduleTaskWithTime`).
+3. For generic `Update<T>` actions, **list cleared keys out-of-band**: the
+   action creator adds `clearedFields` via `clearedFieldsProps()` and the
+   reducer restores them with `applyClearedFields()`
+   (`src/app/util/cleared-update-fields.ts`; used by `updateTaskUi` and
+   `updateTaskRepeatCfg`). Old clients ignore the extra prop, so the clear
+   degrades to a no-op there instead of corrupting state — no schema bump.
+
+On the conflict-resolution side, `createLWWUpdateOp` never lists
+`clearedFields` unless the call site opts in via `listClearedFields` — today
+only the disjoint-merge delta does, re-declaring clears the conflicting ops
+themselves carried. Patch payloads built from **live state** (e.g.
+`taskRelationshipPatch`) materialize accidental `undefined` keys — every root
+task's `parentId` — and must never opt in: listing those would broadcast a
+real clear to receivers (pinned by tests (a0c) in
+`conflict-resolution.disjoint-merge.spec.ts` and the relationship follow-up
+pin in `conflict-resolution.service.spec.ts`).
+
+Do **not** invent in-band sentinels (`null`, `0`, marker strings): remote
+reducers apply payload values verbatim, so released clients would persist the
+sentinel and fail typia state validation.
+
+---
+
 ## Decision table — "I'm writing an effect"
 
-| Question                                                | Answer                                                        | Linter                               |
-| ------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------ |
-| Does it inject the actions stream?                      | Use `LOCAL_ACTIONS` (not `Actions`)                           | ✅ `no-actions-in-effects` (error)   |
-| Does it react to a **selector** instead of an action?   | Add `skipDuringSyncWindow()`                                  | ✅ `require-hydration-guard` (error) |
-| Does one replay-atomic transition change **>1 entity**? | Make it a meta-reducer, not an effect                         | ⚠️ `no-multi-entity-effect` (warn)   |
-| Does it dispatch in a **loop of 50+**?                  | Yield once afterward for capture ordering; it is not batching | — (convention)                       |
+| Question                                                        | Answer                                                                                                    | Linter                                           |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Does it inject the actions stream?                              | Use `LOCAL_ACTIONS` (not `Actions`)                                                                       | ✅ `no-actions-in-effects` (error)               |
+| Can a selector emission be safely retried by the next emission? | Drop it with `skipDuringSyncWindow()`                                                                     | ✅ `require-hydration-guard` (error)             |
+| Is the selector emission a sparse/unrecoverable edge?           | Enter through the required initial-sync gate, capture its state, then defer it with `waitForSyncWindow()` | ✅ window guard only; initial gate is convention |
+| Does one replay-atomic transition change **>1 entity**?         | Make it a meta-reducer, not an effect                                                                     | ⚠️ `no-multi-entity-effect` (warn)               |
+| Does it dispatch in a **loop of 50+**?                          | Yield once afterward for capture ordering; it is not batching                                             | — (convention)                                   |
 
 Two of the three are mechanically enforced — you do not need to memorize them,
 only understand _why_ (the invariant at the top).
@@ -153,7 +271,9 @@ key-recovery config writes (content-only, must NOT bump).
 
 ## Why (deeper)
 
-- **Mechanism & rules:** [`operation-rules.md`](./operation-rules.md)
+- **Contributor rules:** this document; the old
+  [`operation-rules.md`](./operation-rules.md) path is now a compatibility
+  pointer.
 - **Architecture tour:**
   [`sync-architecture.html#local-intent`](./sync-architecture.html#local-intent),
   [`sync-architecture.html#remote-apply`](./sync-architecture.html#remote-apply)
@@ -161,4 +281,6 @@ key-recovery config writes (content-only, must NOT bump).
   [`operation-log-architecture.md`](./operation-log-architecture.md)
 - **Source of truth:** `src/app/util/local-actions.token.ts`,
   `src/app/util/skip-during-sync-window.operator.ts`,
+  `src/app/util/wait-for-sync-window.operator.ts`,
+  `src/app/imex/sync/sync-trigger.service.ts`,
   `src/app/op-log/apply/hydration-state.service.ts`

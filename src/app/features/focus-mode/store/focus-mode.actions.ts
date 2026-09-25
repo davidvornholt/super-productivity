@@ -21,7 +21,7 @@ export const startFocusPreparation = createAction('[FocusMode] Start Preparation
 
 export const startFocusSession = createAction(
   '[FocusMode] Start Session',
-  props<{ duration?: number }>(),
+  props<{ duration?: number; taskId?: string }>(),
 );
 
 export const navigateToMainScreen = createAction('[FocusMode] Navigate To Main Screen');
@@ -99,5 +99,6 @@ export const restoreFocusSessionFromNative = createAction(
     remainingMs: number;
     isBreak: boolean;
     isPaused: boolean;
+    pausedTaskId?: string;
   }>(),
 );

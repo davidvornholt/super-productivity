@@ -109,6 +109,42 @@ describe('hasFocusNotificationStateChanged (notification reconciliation, #7856)'
   });
 });
 
+describe('hasFocusNotificationStateChanged (task reconciliation, #9399)', () => {
+  it('pushes immediately when the current task changes without a timer change', () => {
+    const timer = workTimer(0);
+
+    expect(
+      hasFocusNotificationStateChanged(
+        timer,
+        timer,
+        { id: 'task-a', title: 'Task A' },
+        { id: 'task-b', title: 'Task B' },
+      ),
+    ).toBe(true);
+  });
+
+  it('pushes immediately when the current task title changes', () => {
+    const timer = workTimer(0);
+
+    expect(
+      hasFocusNotificationStateChanged(
+        timer,
+        timer,
+        { id: 'task-a', title: 'Old title' },
+        { id: 'task-a', title: 'New title' },
+      ),
+    ).toBe(true);
+  });
+
+  it('still throttles a normal tick when the current task is unchanged', () => {
+    const task = { id: 'task-a', title: 'Task A' };
+
+    expect(
+      hasFocusNotificationStateChanged(workTimer(60_000), workTimer(61_000), task, task),
+    ).toBe(false);
+  });
+});
+
 // handleNativeTimerComplete$ acts on a native completion only while the matching
 // session is still active. The work-session guard is what prevents a double
 // completion when a resume tick (#7856) already finished the session before the
@@ -217,6 +253,31 @@ describe('shouldHandleNativeTimerComplete (stale/duplicate completion guard, #88
 // --- #7855: focus-session recovery helpers (see #7866) ---
 describe('AndroidFocusModeEffects helpers (#7855)', () => {
   describe('parseNativeFocusModeData', () => {
+    it('reads the task clock independently of the focus session duration', () => {
+      const data = {
+        durationMs: 0,
+        remainingMs: 180_000,
+        isBreak: false,
+        isPaused: false,
+        taskId: 'tracked-task',
+        taskTimeSpentMs: 900_000,
+        isTaskTracking: true,
+      };
+      expect(parseNativeFocusModeData(JSON.stringify(data))).toEqual(data);
+    });
+
+    it('retains the task association when its native clock is paused', () => {
+      const data = {
+        durationMs: 0,
+        remainingMs: 180_000,
+        isBreak: false,
+        isPaused: true,
+        taskId: 'paused-task',
+        taskTimeSpentMs: 900_000,
+        isTaskTracking: false,
+      };
+      expect(parseNativeFocusModeData(JSON.stringify(data))).toEqual(data);
+    });
     it('returns null for falsy / "null" input', () => {
       expect(parseNativeFocusModeData(null)).toBeNull();
       expect(parseNativeFocusModeData(undefined)).toBeNull();

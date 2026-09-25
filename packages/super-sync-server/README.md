@@ -10,6 +10,7 @@ A custom, high-performance synchronization server for Super Productivity.
 > - [Sync Architecture Field Guide](../../docs/sync-and-op-log/sync-architecture.html) - Whole-system maintainer overview
 > - [Server Architecture](./docs/architecture.md) - Server-only contracts and trust boundaries
 > - [Backup & Disaster Recovery](./docs/backup-and-recovery.md) - Backup setup and recovery procedures
+> - [Production Capacity](./docs/production-capacity.md) - Measured I/O limits of the hosted deployment and what they mean when you write a query
 
 ## Architecture
 
@@ -38,16 +39,34 @@ Deploy hosts need Docker with the Compose plugin, `curl`, `git`, and `jq`.
 The image revision check requires Docker Compose support for
 `docker compose config --format json`.
 
+> **There are no release tags.** `ghcr.io/super-productivity/supersync` publishes
+> only `latest` and `master-<sha>`, both built from `master`, so a default deploy
+> tracks upstream `master` rather than a released version. Pin `SUPERSYNC_IMAGE`
+> to a `master-<sha>` tag if you need a fixed one.
+
 ```bash
-# 1. Copy environment example
+# 1. Clone the repo (deploy.sh runs from this checkout) and enter this directory
+git clone https://github.com/super-productivity/super-productivity.git
+cd super-productivity/packages/super-sync-server
+
+# 2. Copy environment example
 cp env.example .env
 
-# 2. Configure .env (Set JWT_SECRET, DOMAIN, POSTGRES_PASSWORD)
+# 3. Configure .env (Set JWT_SECRET, DOMAIN, POSTGRES_PASSWORD)
 nano .env
 
-# 3. Deploy the stack and run database migrations
+# 4. Deploy the stack and run database migrations
 ./scripts/deploy.sh
 ```
+
+`./scripts/deploy.sh --build` builds the image locally instead of pulling it.
+That compiles the whole monorepo **on the deploy host**, beside the running
+stack: expect several minutes and a peak above 1.5 GB of RAM on top of the
+~2.5 GB the containers already reserve, plus a BuildKit cache that grows by
+~1.4 GB per build and is never pruned for you. On a small VPS, prefer the pull,
+or build elsewhere and set `SUPERSYNC_IMAGE` (passing the same `VCS_REF`, see
+below). `--build` also refuses to run if the image inputs have uncommitted or
+untracked changes; the error names the offending files.
 
 `docker compose up` is not a deployment substitute: container startup migrations
 are disabled by default so app restarts cannot race the deploy migrator.
@@ -126,10 +145,19 @@ printf '%s\n' \
 >
 > - **Database created with `prisma db push`** (no migration history): its
 >   logical schema already matches the latest `schema.prisma`, but `db push`
->   cannot represent the `operations_entity_ids_gin` storage reloption. Apply
->   that database-only state and drain the old pending list before baselining
->   the whole chain. The explicit transaction keeps `SET LOCAL` scoped to the
->   `ALTER`; if its lock timeout fires, retry this off-hours.
+>   cannot represent storage reloptions — neither the
+>   `operations_entity_ids_gin` fastupdate setting nor the `operations`
+>   autovacuum factors. Apply that database-only state and drain the old pending
+>   list before baselining the whole chain, or the loop below marks those two
+>   reloption migrations applied on a database that never received them. (This
+>   closes the reloption gap only — the partial indexes in `20260512000000`,
+>   `20260514000000` and `20260514000002` are equally unrepresentable in
+>   `db push` and remain a known gap, tracked with `schema.prisma`'s partial
+>   index notes.) Each explicit transaction keeps `SET LOCAL` scoped to its
+>   statement; if a lock timeout fires, retry off-hours. The autovacuum `ALTER`
+>   takes only `SHARE UPDATE EXCLUSIVE` so it never blocks app traffic, but SUE
+>   does conflict with itself, so it is bounded too rather than left to wait
+>   behind a running `VACUUM` with no feedback.
 >
 >   ```bash
 >   (
@@ -138,6 +166,11 @@ printf '%s\n' \
 >       'BEGIN;' \
 >       "SET LOCAL lock_timeout = '1s';" \
 >       'ALTER INDEX "operations_entity_ids_gin" SET (fastupdate = off);' \
+>       'COMMIT;' | npx prisma db execute --schema prisma/schema.prisma --stdin
+>     printf '%s\n' \
+>       'BEGIN;' \
+>       "SET LOCAL lock_timeout = '5s';" \
+>       'ALTER TABLE "operations" SET (autovacuum_vacuum_insert_scale_factor = 0.02);' \
 >       'COMMIT;' | npx prisma db execute --schema prisma/schema.prisma --stdin
 >     printf '%s\n' \
 >       'BEGIN;' \
@@ -163,11 +196,29 @@ app/proxy services with compose dependencies disabled so the bundled Postgres
 container is not required. Prisma migrations still run against the configured
 `DATABASE_URL`.
 
-### Payload byte backfill and batch uploads
+**PostgreSQL 16 or newer is the supported version**, and it is what CI and
+production run (the bundled compose image is `postgres:16-alpine`). PostgreSQL
+14 and 15 still work and still receive every migration — `migrate-deploy.sh`
+warns and continues — they are simply not covered by the test suite.
 
-The `payload_bytes` column must be fully backfilled before enabling batched
-uploads in production. During a partial backfill, quota reconciles use a slower
-fallback for old operation rows with `payload_bytes = 0`.
+**PostgreSQL 14 on a Linux host is the hard floor**, and it is enforced by the
+connection rather than documented: the migration pipeline sets
+`client_connection_check_interval` on its connections so an abandoned
+`CREATE INDEX CONCURRENTLY` cancels itself instead of holding the table lock. An
+older or non-Linux server rejects that startup option with a FATAL
+`unrecognized configuration parameter` error on every migration connection, so
+nothing is ever applied. That also covers the chain's own PG13 requirement —
+migration `20260828000003` sets `autovacuum_vacuum_insert_scale_factor`, and on
+an older server the resulting `22023` would match no recovery gate in the
+script, leaving the migration failed and every later deploy dying on `P3009`.
+
+### Payload byte backfill
+
+Backfilling is optional for startup: the incremental storage counter keeps
+working without it. But while a user still has legacy rows with
+`payload_bytes = 0`, exact quota reconciles for that user are deferred (the
+server refuses to overwrite the exact counter with an approximate sum), so run
+the backfill if you want reconciliation to work for legacy accounts.
 
 Run the backfill to completion:
 
@@ -181,16 +232,6 @@ In a source checkout before `npm run build`, use:
 npm run migrate-payload-bytes:dev
 ```
 
-Only then set both rollout flags:
-
-```bash
-SUPERSYNC_BATCH_UPLOAD=true
-SUPERSYNC_PAYLOAD_BYTES_BACKFILL_COMPLETE=true
-```
-
-The server refuses to start with `SUPERSYNC_BATCH_UPLOAD=true` unless the
-completion flag is also set.
-
 ### Manual Setup (Development)
 
 ```bash
@@ -202,7 +243,8 @@ npx prisma generate
 
 # Set up .env
 cp env.example .env
-# Edit .env to point to your PostgreSQL instance (DATABASE_URL)
+# Edit .env: point DATABASE_URL at your PostgreSQL instance, and set JWT_SECRET
+# and POSTGRES_PASSWORD — both ship empty and the server refuses to start without them
 
 # Push schema to DB
 npx prisma db push
@@ -217,27 +259,59 @@ npm start
 
 ## Configuration
 
-Reverse proxies must explicitly configure `TRUST_PROXY_ADDRESSES` with the exact
-comma-separated IPv4/IPv6 peer addresses seen by the server. Forwarded headers are
-ignored when this setting is empty (the default). Numeric hop counts, `true`,
-hostnames, and broad CIDRs are rejected. When upgrading an existing reverse-proxied
-installation, set this value before deploying the new image so client-IP rate limits
-continue to distinguish clients. For a containerized proxy, use its controlled peer
-address; if trusting a host gateway, keep the origin port bound to loopback and
-unreachable by untrusted containers. The proxy must replace untrusted forwarded
-headers. See the [Fastify security advisory](https://github.com/fastify/fastify/security/advisories/GHSA-3m5p-2c4r-xxw2).
-
 All configuration is done via environment variables.
 
-| Variable       | Default                              | Description                                                                     |
-| :------------- | :----------------------------------- | :------------------------------------------------------------------------------ |
-| `PORT`         | `1900`                               | Server port                                                                     |
-| `HOST`         | `0.0.0.0`                            | Server bind address. Use `::` for IPv6-only deployments.                        |
-| `DATABASE_URL` | -                                    | PostgreSQL connection string (e.g. `postgresql://user:pass@localhost:5432/db`)  |
-| `JWT_SECRET`   | -                                    | **Required.** Secret for signing JWTs (min 32 chars)                            |
-| `PUBLIC_URL`   | -                                    | **Required.** Public URL used for email links (e.g. `https://sync.example.com`) |
-| `CORS_ORIGINS` | `https://app.super-productivity.com` | Allowed CORS origins                                                            |
-| `SMTP_HOST`    | -                                    | SMTP Server for emails                                                          |
+| Variable                                | Default                              | Description                                                                                                                                    |
+| :-------------------------------------- | :----------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                                  | `1900`                               | Server port                                                                                                                                    |
+| `HOST`                                  | `0.0.0.0`                            | Server bind address. Use `::` for IPv6-only deployments.                                                                                       |
+| `DATABASE_URL`                          | -                                    | PostgreSQL connection string (e.g. `postgresql://user:pass@localhost:5432/db`)                                                                 |
+| `JWT_SECRET`                            | -                                    | **Required.** Secret for signing JWTs (min 32 chars)                                                                                           |
+| `PUBLIC_URL`                            | -                                    | **Required.** Public URL used for email links (e.g. `https://sync.example.com`)                                                                |
+| `CORS_ORIGINS`                          | `https://app.super-productivity.com` | Allowed CORS origins. `*` allows any origin — never do this in production, CORS runs with `credentials: true`.                                 |
+| `SMTP_HOST`                             | -                                    | SMTP Server for emails                                                                                                                         |
+| `WEBAUTHN_RP_ID`                        | `localhost`                          | **Required for passkeys.** Your domain, without protocol or port. Passkeys bind to this — changing it invalidates every registered credential. |
+| `WEBAUTHN_ORIGIN`                       | `http://localhost:1900`              | **Required for passkeys.** Where users reach the auth UI, with protocol.                                                                       |
+| `WEBAUTHN_RP_NAME`                      | value of `WEBAUTHN_RP_ID`            | Name shown in your users' OS passkey prompt.                                                                                                   |
+| `ALLOWED_EMAILS`                        | - (anyone may register)              | Comma-separated exact addresses and/or `*@domain` rules.                                                                                       |
+| `SUPERSYNC_DEFAULT_STORAGE_QUOTA_BYTES` | `104857600` (100 MB)                 | Quota for accounts created from now on. Existing accounts keep the value stored on their row.                                                  |
+
+### Legal pages
+
+**The image ships no Terms of Service, and serves no privacy policy until you identify
+yourself as the data controller.** This is deliberate: our own documents name German law,
+a Leipzig venue and our contact address, and publishing them under your domain would be a
+false legal statement made in your name.
+
+Set **all five** of these to publish `/privacy.html` and show the registration consent
+notice. Set none and the legal pages are simply not served. A partial set is a startup
+error, not a silent fallback.
+
+| Variable                  | Description                                  |
+| :------------------------ | :------------------------------------------- |
+| `PRIVACY_CONTACT_NAME`    | Controller name (person or company)          |
+| `PRIVACY_ADDRESS_STREET`  | Street address                               |
+| `PRIVACY_ADDRESS_CITY`    | Postcode and city                            |
+| `PRIVACY_ADDRESS_COUNTRY` | Country                                      |
+| `PRIVACY_CONTACT_EMAIL`   | Contact address for data-protection requests |
+
+`PRIVACY_DATA_REGION` is separate from the five: set it to `EU` (or `EEA`) to show the
+"Data hosted in EU" badge on the landing page. Any other value shows no badge, because an
+EU flag above "hosted in the US" is the kind of false claim these pages exist to avoid.
+
+Two optional sections are omitted from the policy entirely when unset:
+`PRIVACY_HOSTING_PROVIDER` (your hosting provider, if a third party processes data on your
+behalf) and `PRIVACY_SUPERVISORY_AUTHORITY` (the authority competent for you — without it
+the policy points users to the authority for their own residence).
+
+To publish your own Terms of Service, put the HTML at `<DATA_DIR>/legal/terms.html`; it is
+copied to `/terms.html` at startup and linked from the consent notice. With the bundled
+compose file that means bind-mounting it — see the commented example in
+`docker-compose.yml`. Deployments driven by `scripts/deploy.sh` can instead set
+`SUPERSYNC_INSTALL_REPO_TERMS=true` in `.env` to sync `legal/terms.html` from the git
+checkout into the data volume on every deploy — do that only if the file in your checkout
+is genuinely yours. The shipped template is a starting point, not legal advice: review
+every section against how you actually operate before publishing it.
 
 ## API Endpoints
 
@@ -353,7 +427,11 @@ invalidates only the process performing that write.
 
 **Impact**: After token replacement, passkey recovery, or account deletion, a
 different replica can accept a previously cached JWT for at most the remaining
-cache TTL.
+cache TTL. Token replacement and passkey recovery also force-close the
+account's WebSocket connections, but only those held by the instance handling
+the request — on other replicas a revoked device's socket keeps receiving op
+notifications (metadata only, no op data) until its next reconnect attempt
+fails.
 
 **Solution for multi-instance**: Use shared invalidation or centralized
 verification. Consistent per-account routing can reduce exposure, but is not a
@@ -403,6 +481,13 @@ limitations do not apply. Process restarts still clear in-memory coordination.
 ## Security Notes
 
 - **Set JWT_SECRET** to a secure random value in production (min 32 characters).
+- **If you deployed before env.example stopped shipping a placeholder, check your
+  `.env` now.** Earlier versions shipped
+  `JWT_SECRET=your-secure-jwt-secret-minimum-32-characters`, which is 32+ chars and
+  so passed validation. If your `.env` still contains it, your token signing key is
+  public: anyone can mint a token for any user. Replace it
+  (`openssl rand -base64 32`) and restart. Rotating invalidates every issued token,
+  so all users must log in again.
 - **Treat email verification, login, and recovery links as credentials.** Their
   tokens are currently stored in plaintext. Expiry prevents use but is not a
   general automatic-deletion boundary: records are cleared when their flow

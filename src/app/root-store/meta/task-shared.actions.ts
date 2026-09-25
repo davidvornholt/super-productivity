@@ -1,4 +1,5 @@
 import { createActionGroup } from '@ngrx/store';
+import { SUPER_SYNC_MAX_ENTITY_IDS_PER_OP } from '@sp/shared-schema';
 import { Update } from '@ngrx/entity';
 import { Task, TaskWithSubTasks } from '../../features/tasks/task.model';
 import { IssueDataReduced } from '../../features/issue/issue.model';
@@ -16,6 +17,73 @@ import { shouldClearDueTimeForToday } from '../../util/is-today.util';
  * empty project (see ARCHITECTURE-DECISIONS.md #7).
  */
 export const PROJECT_DELETE_WINS_MARKER = 'projectDeleteWins';
+
+export interface CalendarAutoImportDismissal {
+  issueProviderId: string;
+  issueId: string;
+}
+
+export const getCalendarAutoImportDismissals = (
+  tasks: readonly Task[],
+): CalendarAutoImportDismissal[] =>
+  tasks.flatMap((task) =>
+    task.issueType === 'ICAL' && task.issueProviderId && task.issueId
+      ? [{ issueProviderId: task.issueProviderId, issueId: task.issueId }]
+      : [],
+  );
+
+interface ArchivedTaskLike {
+  id?: unknown;
+  subTaskIds?: unknown;
+  subTasks?: unknown;
+}
+
+const asArchivedTaskLike = (value: unknown): ArchivedTaskLike | undefined =>
+  value && typeof value === 'object' ? (value as ArchivedTaskLike) : undefined;
+
+const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/**
+ * Every task entity a `moveToArchive` removes from active state: the tasks it
+ * names PLUS the subtasks its reducer cascades to.
+ *
+ * `meta.entityIds` is the footprint conflict detection works on — client-side
+ * (`getOpEntityIds` → one conflict row per id) and server-side (the upload
+ * conflict probe). Declaring only the top-level ids meant a concurrent edit to
+ * a SUBTASK of an archived parent never got "archive wins" precedence: its
+ * LWW-resolved snapshot was accepted after the archive and recreated the
+ * subtask next to its archived copy.
+ *
+ * Parents come first so `entityId` (= `entityIds[0]`, assigned in
+ * `operation-log.effects.ts`) stays a top-level task id. Deduped, and
+ * non-string entries are dropped because this array goes on the wire.
+ *
+ * Old ops in existing logs carry top-level ids only; every consumer re-derives
+ * the cascade from the payload/state, so both shapes stay valid.
+ */
+export const collectArchivedTaskEntityIds = (tasks: readonly unknown[]): string[] => {
+  const topLevelIds = tasks.flatMap((task) => {
+    const id = asArchivedTaskLike(task)?.id;
+    return typeof id === 'string' && id !== '' ? [id] : [];
+  });
+  const ids = new Set<string>(topLevelIds);
+  for (const task of tasks) {
+    const taskLike = asArchivedTaskLike(task);
+    if (!taskLike) continue;
+    for (const id of asArray(taskLike.subTaskIds)) {
+      if (typeof id === 'string' && id !== '') ids.add(id);
+    }
+    for (const subTask of asArray(taskLike.subTasks)) {
+      const id = asArchivedTaskLike(subTask)?.id;
+      if (typeof id === 'string' && id !== '') ids.add(id);
+    }
+  }
+  // The server rejects an op declaring more ids than this (INVALID_ENTITY_ID),
+  // which would strand that archive unsynced forever. Degrading to the
+  // pre-cascade footprint keeps a mass archive syncing: receivers still derive
+  // the cascade from the payload.
+  return ids.size > SUPER_SYNC_MAX_ENTITY_IDS_PER_OP ? topLevelIds : [...ids];
+};
 
 /**
  * Shared actions that affect multiple reducers (tasks, projects, tags)
@@ -92,27 +160,37 @@ export const TaskSharedActions = createActionGroup({
     // Issue metadata for remote issue deletion still travels through
     // DeletedTaskIssueSidecarService. Task snapshots are persisted separately
     // so a concurrent winning update can recreate an entity after this delete.
-    deleteTasks: (taskProps: { taskIds: string[]; tasks?: Task[] }) => ({
-      ...taskProps,
-      meta: {
-        isPersistent: true,
-        entityType: 'TASK',
-        entityIds: taskProps.taskIds,
-        opType: OpType.Delete,
-        isBulk: true,
-      } satisfies PersistentActionMeta,
-    }),
+    deleteTasks: (taskProps: { taskIds: string[]; tasks?: Task[] }) => {
+      const calendarAutoImportDismissals = getCalendarAutoImportDismissals(
+        taskProps.tasks ?? [],
+      );
+      return {
+        ...taskProps,
+        ...(calendarAutoImportDismissals.length > 0 && {
+          calendarAutoImportDismissals,
+        }),
+        meta: {
+          isPersistent: true,
+          entityType: 'TASK',
+          entityIds: taskProps.taskIds,
+          opType: OpType.Delete,
+          isBulk: true,
+        } satisfies PersistentActionMeta,
+      };
+    },
 
     // TODO rename to `moveTaskToArchive__` to indicate it should not be called directly
     // Note: Full task payload is required for sync reliability.
     // Remote clients need task data to write to their local archive.
-    // See docs/archive-operation-redesign.md for detailed analysis.
+    // See docs/sync-and-op-log/operation-log-architecture.md for detailed analysis.
     moveToArchive: (taskProps: { tasks: TaskWithSubTasks[] }) => ({
       ...taskProps,
       meta: {
         isPersistent: true,
         entityType: 'TASK',
-        entityIds: taskProps.tasks.map((t) => t.id),
+        // Includes the subtasks the reducer cascades to — see
+        // collectArchivedTaskEntityIds for why the footprint must be complete.
+        entityIds: collectArchivedTaskEntityIds(taskProps.tasks),
         opType: OpType.Update,
         isBulk: true,
       } satisfies PersistentActionMeta,
@@ -238,7 +316,7 @@ export const TaskSharedActions = createActionGroup({
       } satisfies PersistentActionMeta,
     }),
 
-    dismissReminderOnly: (taskProps: { id: string }) => ({
+    dismissReminderOnly: (taskProps: { id: string; isSkipSnack?: boolean }) => ({
       ...taskProps,
       meta: {
         isPersistent: true,
@@ -256,6 +334,7 @@ export const TaskSharedActions = createActionGroup({
       deadlineRemindAt?: number;
       autoPlanToday?: string;
       autoPlanStartOfNextDayDiffMs?: number;
+      isSkipSnack?: boolean;
     }) => ({
       ...taskProps,
       meta: {
@@ -281,7 +360,7 @@ export const TaskSharedActions = createActionGroup({
       } satisfies PersistentActionMeta,
     }),
 
-    removeDeadline: (taskProps: { taskId: string }) => ({
+    removeDeadline: (taskProps: { taskId: string; isSkipSnack?: boolean }) => ({
       ...taskProps,
       meta: {
         isPersistent: true,

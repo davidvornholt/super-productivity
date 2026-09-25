@@ -84,6 +84,13 @@ export const pickInitialActiveRef = (
 export const BUILT_IN_THEMES: CustomTheme[] = [
   { id: 'default', name: 'Default', kind: 'builtin', url: '', requiredMode: 'system' },
   {
+    id: 'classic',
+    name: 'Classic',
+    kind: 'builtin',
+    url: 'assets/themes/classic.css',
+    requiredMode: 'system',
+  },
+  {
     id: 'zen',
     name: 'Zen',
     kind: 'builtin',
@@ -138,13 +145,6 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
     kind: 'builtin',
     url: 'assets/themes/glass.css',
     requiredMode: 'dark',
-  },
-  {
-    id: 'lines',
-    name: 'Lines',
-    kind: 'builtin',
-    url: 'assets/themes/lines.css',
-    requiredMode: 'system',
   },
   {
     id: 'liquid-glass',

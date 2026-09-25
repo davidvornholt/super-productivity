@@ -5,10 +5,14 @@ import { Tag } from '../tag/tag.model';
 import { Project } from '../project/project.model';
 import { ShortSyntaxConfig } from '../config/global-config.model';
 import { isImageUrlSimple } from '../../util/is-image-url';
+import { formatTimeHHmm } from '../../util/format-time-hhmm';
 import { TaskAttachment } from './task-attachment/task-attachment.model';
 import { nanoid } from 'nanoid';
 import type { Chrono, ParsingContext, ParsingResult } from 'chrono-node';
-import { RepeatQuickSetting } from '../task-repeat-cfg/task-repeat-cfg.model';
+import {
+  RepeatCycleOption,
+  RepeatQuickSetting,
+} from '../task-repeat-cfg/task-repeat-cfg.model';
 import { TextRange, TrackedTitle } from './tracked-title';
 type ProjectChanges = {
   title?: string;
@@ -35,6 +39,15 @@ export interface ShortSyntaxRange {
   start: number;
   end: number;
 }
+
+// A recurrence parsed from the input. Either one of the dialog's presets
+// ("@every friday") or an explicit interval ("@every 2 days"), which has no
+// preset because every preset hardcodes `repeatEvery: 1`. An interval becomes a
+// `quickSetting: 'CUSTOM'` config — the one setting whose interval the repeat
+// dialog can display and round-trip.
+export type ShortSyntaxRepeat =
+  | { type: 'PRESET'; quickSetting: Exclude<RepeatQuickSetting, 'CUSTOM'> }
+  | { type: 'INTERVAL'; repeatCycle: RepeatCycleOption; repeatEvery: number };
 
 const CH_TSP = '/';
 // Due how this expression capture clusters of duration units, be mindful of
@@ -134,44 +147,67 @@ const WEEKDAY_UNITS: Record<string, number> = {
   saturday: 6,
 };
 
-// Recurrence phrase at the start of a due match: either a bare frequency word
-// ("@daily") or an "every ..." phrase ("@every friday", "@every 15th").
-// Anchored to the start so "@some day every year" is parsed as a plain date,
-// not a recurrence. Intervals ("@every 2 weeks") are deliberately NOT matched:
-// the quick-setting presets all mean an interval of 1, and the repeat dialog
-// can neither display nor preserve a different interval on a preset — such
-// phrases fall through to the plain-date path instead. The phrase may be
-// followed by whitespace, end-of-input, or trailing punctuation ("water
+const weekdayOfUnit = (unit: string): number | undefined =>
+  WEEKDAY_UNITS[unit] ?? WEEKDAY_UNITS[unit.replace(/s$/, '')];
+
+// Full names before abbreviations: alternation is leftmost-first, so listing
+// "fri" first would leave the "day" of "friday" behind and fail the phrase-end
+// lookahead.
+const WEEKDAY_UNIT_SOURCE =
+  'mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?' +
+  '|mon|tues?|wed|thu(?:rs?)?|fri|sat|sun';
+
+// Recurrence phrase at the start of a due match: a bare frequency word
+// ("@daily"), an "every ..." phrase ("@every friday", "@every 15th"), or an
+// interval ("@every 2 days", "@every 2 fridays"). Anchored to the start so
+// "@some day every year" is parsed as a plain date, not a recurrence. The phrase
+// may be followed by whitespace, end-of-input, or trailing punctuation ("water
 // plants @every friday.") — chrono is equally punctuation-tolerant for plain
 // dates, so without this the dot would demote the whole phrase to a plain
 // "friday" date. The ordinal suffix is deliberately not checked against the
 // number ("@every 15st" parses as the 15th): typos should still hit the
-// recurrence people meant, not fall back to a plain date.
+// recurrence people meant, not fall back to a plain date. Interval counts are
+// 1-999: a never-recurring "@every 0 days" falls through to the plain-date path,
+// and the upper bound stays one notch inside the dialog's `repeatEvery` max of
+// 1000. Excluding them in the grammar rather than in the parse below keeps the
+// derived removal regex in step: a bound checked in the parse would leave the
+// clear-repeat button deleting "@every 0 days", which the parser never consumed.
+// `weekday(s)`/`workday(s)` are deliberately absent from the interval units:
+// "every 2 weekdays" means every other workday, which a weekly cycle cannot
+// express (five weekday flags plus an interval means every other *week*, all
+// five days), so it stays a plain date rather than becoming a wrong schedule.
 const REPEAT_PHRASE_SOURCE =
   '(?:(daily|weekly|monthly|yearly|annually)' +
   '|every\\s+(' +
   'days?|weeks?|months?|years?|weekdays?|workdays?' +
-  '|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?' +
-  '|mon|tues?|wed|thu(?:rs?)?|fri|sat|sun' +
+  `|${WEEKDAY_UNIT_SOURCE}` +
   '|\\d{1,2}(?:st|nd|rd|th)' +
-  '))(?=[\\s.,;:!?]|$)';
+  ')' +
+  `|every\\s+([1-9]\\d{0,2})\\s+(days?|weeks?|months?|years?|${WEEKDAY_UNIT_SOURCE})` +
+  ')(?=[\\s.,;:!?]|$)';
 
 const SHORT_SYNTAX_REPEAT_REG_EX = new RegExp('^' + REPEAT_PHRASE_SOURCE, 'i');
 
 // The same grammar re-anchored to the trigger char, for removing a recurrence
-// phrase from raw input (the clear-repeat button). Derived rather than
-// hand-written so the button can only ever delete text the parser would have
-// consumed — a second, broader grammar here silently eats phrases that fall
-// through to the plain-date path ("@every 2 weeks", "@every quarter"). The
-// leading `\s*` also lets trailing punctuation join the preceding word, the
-// way applyRepeatSyntax does ("Water plants @every friday." → "Water plants.").
+// phrase from raw input. Derived rather than hand-written so it cannot drift
+// from the parser — a second, broader grammar here silently eats phrases that
+// fall through to the plain-date path ("@every quarter", "@every 2 weekdays").
+// It is not equivalent to what the parser consumed, though: the parser matches
+// at the start of a due match (which ends at the next `+ # @ !`), this scans the
+// whole raw input, so the two disagree at the edges — "Task @every friday#tag"
+// is a recurrence this regex leaves alone, and "Task @tomorrow @daily" is not
+// one but has its second token matched here. Removing the ranges the parser
+// recorded is what avoids both (AddTaskBarParserService); this is the fallback
+// for when no parse has landed for the text yet. The leading `\s*` also lets
+// trailing punctuation join the preceding word, the way applyRepeatSyntax does
+// ("Water plants @every friday." → "Water plants.").
 export const SHORT_SYNTAX_REPEAT_REMOVAL_REG_EX = new RegExp(
   `\\s*\\${CH_DUE}` + REPEAT_PHRASE_SOURCE,
   'gi',
 );
 
 interface RepeatSyntaxResult {
-  quickSetting: RepeatQuickSetting;
+  repeat: ShortSyntaxRepeat;
   // Remainder after the recurrence phrase, run through chrono for an optional
   // time ("3pm" in "@every friday 3pm")
   chronoText: string;
@@ -182,6 +218,35 @@ interface RepeatSyntaxResult {
   dayOfMonth?: number;
 }
 
+// Cycle word ("days", "week", …) → the cycle it repeats on. Shared by the
+// interval branch and its every-1 collapse below.
+const cycleForUnit = (unit: string): RepeatCycleOption => {
+  if (unit.startsWith('day')) {
+    return 'DAILY';
+  }
+  if (unit.startsWith('week')) {
+    return 'WEEKLY';
+  }
+  if (unit.startsWith('month')) {
+    return 'MONTHLY';
+  }
+  // year(s)
+  return 'YEARLY';
+};
+
+// The preset meaning the same thing as an interval of 1, so "@every 1 week" is
+// indistinguishable from "@every week" — same chip label, same skipOverdue
+// default, same editable-as-a-preset config.
+const PRESET_FOR_CYCLE: Record<
+  RepeatCycleOption,
+  Exclude<RepeatQuickSetting, 'CUSTOM'>
+> = {
+  DAILY: 'DAILY',
+  WEEKLY: 'WEEKLY_CURRENT_WEEKDAY',
+  MONTHLY: 'MONTHLY_CURRENT_DATE',
+  YEARLY: 'YEARLY_CURRENT_DATE',
+};
+
 const parseRepeatSyntax = (dueMatchContent: string): RepeatSyntaxResult | null => {
   const m = dueMatchContent.match(SHORT_SYNTAX_REPEAT_REG_EX);
   if (!m) {
@@ -189,35 +254,60 @@ const parseRepeatSyntax = (dueMatchContent: string): RepeatSyntaxResult | null =
   }
   const bareWord = m[1]?.toLowerCase();
   const unit = m[2]?.toLowerCase();
+  const intervalCount = m[3];
+  const intervalUnit = m[4]?.toLowerCase();
   const remainder = dueMatchContent.slice(m[0].length);
 
   const result = (
-    quickSetting: RepeatQuickSetting,
+    repeat: ShortSyntaxRepeat,
     anchor?: { weekday?: number; dayOfMonth?: number },
   ): RepeatSyntaxResult => ({
-    quickSetting,
+    repeat,
     chronoText: remainder,
     consumedLength: m[0].length,
     ...anchor,
   });
 
+  const preset = (
+    quickSetting: Exclude<RepeatQuickSetting, 'CUSTOM'>,
+    anchor?: { weekday?: number; dayOfMonth?: number },
+  ): RepeatSyntaxResult => result({ type: 'PRESET', quickSetting }, anchor);
+
+  if (intervalUnit) {
+    // 1-999 by grammar, so no range check is needed here
+    const repeatEvery = +intervalCount;
+    // "@every 2 fridays" — a weekly interval that names its own weekday instead
+    // of taking today's
+    const intervalWeekday = weekdayOfUnit(intervalUnit);
+    if (intervalWeekday !== undefined) {
+      const anchor = { weekday: intervalWeekday };
+      return repeatEvery === 1
+        ? preset('WEEKLY_CURRENT_WEEKDAY', anchor)
+        : result({ type: 'INTERVAL', repeatCycle: 'WEEKLY', repeatEvery }, anchor);
+    }
+    const repeatCycle = cycleForUnit(intervalUnit);
+    return repeatEvery === 1
+      ? preset(PRESET_FOR_CYCLE[repeatCycle])
+      : result({ type: 'INTERVAL', repeatCycle, repeatEvery });
+  }
+
   if (bareWord) {
     switch (bareWord) {
       case 'daily':
-        return result('DAILY');
+        return preset('DAILY');
       case 'weekly':
-        return result('WEEKLY_CURRENT_WEEKDAY');
+        return preset('WEEKLY_CURRENT_WEEKDAY');
       case 'monthly':
-        return result('MONTHLY_CURRENT_DATE');
+        return preset('MONTHLY_CURRENT_DATE');
       default:
         // yearly | annually
-        return result('YEARLY_CURRENT_DATE');
+        return preset('YEARLY_CURRENT_DATE');
     }
   }
 
-  const weekday = WEEKDAY_UNITS[unit] ?? WEEKDAY_UNITS[unit.replace(/s$/, '')];
+  const weekday = weekdayOfUnit(unit);
   if (weekday !== undefined) {
-    return result('WEEKLY_CURRENT_WEEKDAY', { weekday });
+    return preset('WEEKLY_CURRENT_WEEKDAY', { weekday });
   }
 
   const ordinalMatch = unit.match(/^(\d{1,2})(?:st|nd|rd|th)$/);
@@ -226,23 +316,13 @@ const parseRepeatSyntax = (dueMatchContent: string): RepeatSyntaxResult | null =
     if (dayOfMonth < 1 || dayOfMonth > 31) {
       return null;
     }
-    return result('MONTHLY_CURRENT_DATE', { dayOfMonth });
+    return preset('MONTHLY_CURRENT_DATE', { dayOfMonth });
   }
 
   if (unit.startsWith('weekday') || unit.startsWith('workday')) {
-    return result('MONDAY_TO_FRIDAY');
+    return preset('MONDAY_TO_FRIDAY');
   }
-  if (unit.startsWith('day')) {
-    return result('DAILY');
-  }
-  if (unit.startsWith('week')) {
-    return result('WEEKLY_CURRENT_WEEKDAY');
-  }
-  if (unit.startsWith('month')) {
-    return result('MONTHLY_CURRENT_DATE');
-  }
-  // year(s)
-  return result('YEARLY_CURRENT_DATE');
+  return preset(PRESET_FOR_CYCLE[cycleForUnit(unit)]);
 };
 
 // Next date falling on the given weekday, today or later, at 12:00 (mirrors
@@ -287,6 +367,21 @@ const SHORT_SYNTAX_URL_REG_EX = new RegExp(
 const SHORT_SYNTAX_MARKDOWN_LINK_REG_EX =
   /\[([^\]]+)\]\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g;
 
+// Non-Task marker fields that ride along in taskChanges for consumers to read
+// and that must be stripped before persisting (see short-syntax.effects).
+// Consumers reach the fields structurally through shortSyntax's return type,
+// so the interface is deliberately not exported.
+interface ShortSyntaxMarkers {
+  hasDeadlineTime?: boolean;
+  /**
+   * The typed wall-clock time as HH:mm. dueWithTime alone cannot carry it when
+   * the resolved day is a DST spring-forward day on which that time does not
+   * exist: the timestamp reads back shifted, and the repeat config's startTime
+   * would inherit the shift for every later occurrence, where the time exists.
+   */
+  dueTimeStr?: string;
+}
+
 export const shortSyntax = async (
   task: Task | Partial<Task>,
   config: ShortSyntaxConfig,
@@ -300,12 +395,12 @@ export const shortSyntax = async (
   isParseRepeat: boolean = false,
 ): Promise<
   | {
-      taskChanges: Partial<Task> & { hasDeadlineTime?: boolean };
+      taskChanges: Partial<Task> & ShortSyntaxMarkers;
       newTagTitles: string[];
       remindAt: number | null;
       projectId: string | undefined;
       attachments: TaskAttachment[];
-      repeatQuickSetting: RepeatQuickSetting | null;
+      repeat: ShortSyntaxRepeat | null;
       parsedRanges: ShortSyntaxRange[];
     }
   | undefined
@@ -318,11 +413,11 @@ export const shortSyntax = async (
   }
 
   // TODO clean up this mess
-  let taskChanges: Partial<TaskCopy> & { hasDeadlineTime?: boolean } = {};
+  let taskChanges: Partial<TaskCopy> & ShortSyntaxMarkers = {};
   let projectId: string | undefined;
   let newTagTitles: string[] = [];
   let attachments: TaskAttachment[] = [];
-  let repeatQuickSetting: RepeatQuickSetting | null = null;
+  let repeat: ShortSyntaxRepeat | null = null;
   const parsedRanges: ShortSyntaxRange[] = [];
   // The working title all stages strip from; maps every surviving character
   // back to its raw-input position so consumed spans highlight exactly.
@@ -341,14 +436,16 @@ export const shortSyntax = async (
     }
     const dueResult = await parseScheduledDate(tracked, now, isParseRepeat);
     if (dueResult) {
-      repeatQuickSetting = dueResult.repeatQuickSetting || null;
+      repeat = dueResult.repeat || null;
       taskChanges = { ...taskChanges, ...dueResult.changes };
       pushRanges('due', dueResult.ranges);
       isTitleChanged = true;
     }
   }
 
-  if (config.isEnableDeadline) {
+  // don't allow for issue tasks: imported titles like "Crash on save !3"
+  // would otherwise get an unasked-for deadline
+  if (config.isEnableDeadline && !task.issueId) {
     const deadlineResult = await parseDeadlineDate(tracked, now);
     if (deadlineResult) {
       taskChanges = { ...taskChanges, ...deadlineResult.changes };
@@ -409,7 +506,7 @@ export const shortSyntax = async (
     remindAt: null,
     projectId,
     attachments,
-    repeatQuickSetting,
+    repeat,
     parsedRanges,
   };
 };
@@ -425,6 +522,47 @@ export const parseProjectChanges = (
   const result = parseProjectTracked(task, tracked, allProjects);
   return result ? { title: tracked.text, projectId: result.projectId } : {};
 };
+
+type MatchableProject = {
+  id: string;
+  words: string[];
+  /** title with all whitespace removed, to match titles typed without spaces */
+  squashedTitle: string;
+  titleLength: number;
+};
+
+const toWords = (title: string): string[] => title.trim().toLowerCase().split(/\s+/);
+
+const toMatchableProject = (project: Project): MatchableProject => ({
+  id: project.id,
+  words: toWords(project.title),
+  squashedTitle: project.title.replaceAll(' ', '').toLowerCase(),
+  titleLength: project.title.length,
+});
+
+const isFullyTypedProjectTitle = (
+  project: MatchableProject,
+  typedWords: string[],
+): boolean =>
+  project.words.length === typedWords.length &&
+  project.words.every((word, i) => word === typedWords[i]);
+
+// A partially typed title may only shorten its last word ("+Some Pro"), otherwise
+// task content would get pulled into the project title ("+Home work on taxes" must
+// not match a project "Homework"). A single word may also be typed without any
+// whitespace at all ("+SomePro").
+const isPartiallyTypedProjectTitle = (
+  project: MatchableProject,
+  typedWords: string[],
+): boolean =>
+  typedWords.length === 1
+    ? project.squashedTitle.startsWith(typedWords[0])
+    : typedWords.length <= project.words.length &&
+      typedWords.every((word, i) =>
+        i === typedWords.length - 1
+          ? project.words[i].startsWith(word)
+          : project.words[i] === word,
+      );
 
 const parseProjectTracked = (
   task: Partial<TaskCopy>,
@@ -471,36 +609,51 @@ const parseProjectTracked = (
     };
 
     // Prefer shortest prefix-based project title match
-    const sortedAllProjects = allProjects
-      .slice()
-      .sort((p1, p2) => p1.title.length - p2.title.length);
+    const matchableProjects = allProjects
+      .map(toMatchableProject)
+      .sort((p1, p2) => p1.titleLength - p2.titleLength);
 
-    const existingProject = sortedAllProjects.find(
-      (project) =>
-        project.title.replaceAll(' ', '').toLowerCase().indexOf(projectTitleToMatch) ===
-        0,
+    // The match candidate also contains whatever was typed after the project name
+    // (e.g. "+Some Project Title do the thing"), so walk the word prefixes of the
+    // candidate from the longest down and only consume the words that actually
+    // belong to the project title. A prefix with more words than the longest
+    // project title can never match, which also bounds the walk for long input.
+    const maxNrOfWords = matchableProjects.reduce(
+      (max, project) => Math.max(max, project.words.length),
+      0,
+    );
+    const candidateWordEnds = [...projectTitle.matchAll(/\S+/g)].map(
+      (match) => (match.index ?? 0) + match[0].length,
     );
 
-    if (existingProject) {
-      return {
-        projectId: existingProject.id,
-        ranges: consume(`${CH_PRO}${projectTitle}`),
-      };
-    }
+    const findLongestTypedPrefix = (
+      isMatch: (project: MatchableProject, typedWords: string[]) => boolean,
+    ): { projectId: string; typedTitle: string } | null => {
+      for (
+        let nrOfWords = Math.min(candidateWordEnds.length, maxNrOfWords);
+        nrOfWords > 0;
+        nrOfWords--
+      ) {
+        const typedTitle = projectTitle.slice(0, candidateWordEnds[nrOfWords - 1]);
+        const typedWords = toWords(typedTitle);
+        const project = matchableProjects.find((p) => isMatch(p, typedWords));
+        if (project) {
+          return { projectId: project.id, typedTitle };
+        }
+      }
+      return null;
+    };
 
-    // also try only first word after special char
-    const projectTitleFirstWordOnly = projectTitle.split(' ')[0];
-    const projectTitleToMatch2 = projectTitleFirstWordOnly.replace(' ', '').toLowerCase();
-    const existingProjectForFirstWordOnly = sortedAllProjects.find(
-      (project) =>
-        project.title.replaceAll(' ', '').toLowerCase().indexOf(projectTitleToMatch2) ===
-        0,
-    );
+    // A fully typed title (what the autocomplete inserts) always wins, so that
+    // "+Work in progress" stays in project "Work" even when "Work Inbox" exists
+    const match =
+      findLongestTypedPrefix(isFullyTypedProjectTitle) ||
+      findLongestTypedPrefix(isPartiallyTypedProjectTitle);
 
-    if (existingProjectForFirstWordOnly) {
+    if (match) {
       return {
-        projectId: existingProjectForFirstWordOnly.id,
-        ranges: consume(`${CH_PRO}${projectTitleFirstWordOnly}`),
+        projectId: match.projectId,
+        ranges: consume(`${CH_PRO}${match.typedTitle}`),
       };
     }
   }
@@ -606,8 +759,8 @@ const parseTagChanges = (
 // Result of a date-like stage: the task field changes plus the raw-input
 // ranges of the consumed syntax (the working-title edit happens on `tracked`)
 interface DateStageResult {
-  changes: Partial<TaskCopy> & { hasDeadlineTime?: boolean };
-  repeatQuickSetting?: RepeatQuickSetting;
+  changes: Partial<TaskCopy> & ShortSyntaxMarkers;
+  repeat?: ShortSyntaxRepeat;
   ranges: TextRange[];
 }
 
@@ -738,17 +891,59 @@ const parseShortSyntaxDate = async (
   return null;
 };
 
-// Resolves a matched recurrence phrase into task changes: the quick-setting
-// repeat plus an optional anchor date/time parsed from what follows the
-// phrase ("@every friday 3pm" → next Friday 15:00), with the consumed syntax
-// stripped from the title.
+// The cycle a recurrence's first occurrence has to be anchored to, or null when
+// the schedule has no anchor to preserve (DAILY / MONDAY_TO_FRIDAY: every day
+// resp. every workday is an occurrence, so the first one needs no alignment).
+// The callers below test the result against the anchored cycles by name, so
+// "no anchor" is expressed by returning null — nothing checks for DAILY.
+const anchorCycleOf = (repeat: ShortSyntaxRepeat): RepeatCycleOption | null => {
+  if (repeat.type === 'INTERVAL') {
+    return repeat.repeatCycle === 'DAILY' ? null : repeat.repeatCycle;
+  }
+  switch (repeat.quickSetting) {
+    case 'WEEKLY_CURRENT_WEEKDAY':
+      return 'WEEKLY';
+    case 'MONTHLY_CURRENT_DATE':
+      return 'MONTHLY';
+    case 'YEARLY_CURRENT_DATE':
+      return 'YEARLY';
+    default:
+      return null;
+  }
+};
+
+// MONDAY_TO_FRIDAY has no weekday to anchor to, but it does exclude two:
+// chrono's forwardDate slide lands on the weekend for "@every weekday 6am"
+// typed on a Friday after 06:00. The occurrence engine skips to Monday off the
+// config's weekday flags (getFirstRepeatOccurrence), so leaving the weekend
+// date in place would only make the add bar advertise a first occurrence the
+// task never gets. Mutates in place, like the roll-forward above.
+// Exported because the add bar's menus reach the same combination without any
+// syntax — see add-task-bar/roll-weekend-date-for-repeat.ts.
+export const skipExcludedWeekend = (date: Date): void => {
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  while (date.getDay() === 0 || date.getDay() === 6) {
+    date.setDate(date.getDate() + 1);
+  }
+  // A skipped-over day can be a DST spring-forward day whose 02:00-03:00 hour
+  // does not exist; stepping through it would silently shift the clock time,
+  // and that time is read back into the repeat config's startTime.
+  date.setHours(hours, minutes);
+};
+
+// Resolves a matched recurrence phrase into task changes: the parsed repeat
+// plus an optional anchor date/time parsed from what follows the phrase
+// ("@every friday 3pm" → next Friday 15:00), with the consumed syntax stripped
+// from the title.
 const applyRepeatSyntax = async (
   tracked: TrackedTitle,
   now: Date,
   dueMatch: string,
   repeatResult: RepeatSyntaxResult,
 ): Promise<DateStageResult> => {
-  const { quickSetting, chronoText, consumedLength, weekday, dayOfMonth } = repeatResult;
+  const { repeat, chronoText, consumedLength, weekday, dayOfMonth } = repeatResult;
+  const anchorCycle = anchorCycleOf(repeat);
   const dateParser = await loadCustomDateParser();
   const parsedDateArr = chronoText
     ? dateParser.parse(chronoText, now, { forwardDate: true })
@@ -794,46 +989,55 @@ const applyRepeatSyntax = async (
   // A time-only remainder ("6am") says nothing about which day the recurrence
   // falls on — but chrono's forwardDate has already slid an already-passed time
   // to tomorrow. The *_CURRENT_* presets mean "today's weekday / today's date"
-  // and the repeat cycle derives both from the first occurrence, so taking
-  // chrono's date verbatim would make "@weekly 6am" typed on a Wednesday
-  // morning recur on Thursdays. Pin them to today and let the roll-forward
-  // below advance a whole period instead, exactly like "@every wednesday 6am".
+  // (and an interval anchors its whole cycle on the first occurrence just the
+  // same), so taking chrono's date verbatim would make "@weekly 6am" typed on a
+  // Wednesday morning recur on Thursdays. Pin them to today and let the
+  // roll-forward below advance a whole period instead, exactly like "@every
+  // wednesday 6am". Unanchored schedules (DAILY, MONDAY_TO_FRIDAY) fall through
+  // all three checks: every day resp. every workday is an occurrence, so
+  // chrono's slide to tomorrow is already the correct first one — except when it
+  // slides onto a weekend, which the workday preset excludes (see
+  // skipExcludedWeekend below).
   const isTimeOnlyMatch =
     hasTime &&
     !!parsedDateResult &&
     !parsedDateResult.start.isCertain('day') &&
     !parsedDateResult.start.isCertain('weekday');
   const anchorWeekday =
-    weekday ??
-    (isTimeOnlyMatch && quickSetting === 'WEEKLY_CURRENT_WEEKDAY'
-      ? now.getDay()
-      : undefined);
+    weekday ?? (isTimeOnlyMatch && anchorCycle === 'WEEKLY' ? now.getDay() : undefined);
   const anchorDayOfMonth =
     dayOfMonth ??
-    (isTimeOnlyMatch && quickSetting === 'MONTHLY_CURRENT_DATE'
-      ? now.getDate()
-      : undefined);
+    (isTimeOnlyMatch && anchorCycle === 'MONTHLY' ? now.getDate() : undefined);
 
   let anchorDate =
     anchorWeekday !== undefined
       ? getNextWeekdayDate(now, anchorWeekday)
       : anchorDayOfMonth !== undefined
         ? getNextDayOfMonthDate(now, anchorDayOfMonth)
-        : isTimeOnlyMatch && quickSetting === 'YEARLY_CURRENT_DATE'
+        : isTimeOnlyMatch && anchorCycle === 'YEARLY'
           ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0)
           : null;
 
   if (anchorDate) {
+    // Captured from the chrono result, not from anchorDate after the mutations
+    // below: the anchor (or a roll below) can land on a DST spring-forward day
+    // where the typed time does not exist, and anchorDate can then only hold
+    // the shifted hour. Reading the chrono Date is safe the other way around:
+    // chrono's own validity filter drops any parse whose resolved day would
+    // normalize the typed time (getHours() != get('hour')), so `parsed` can
+    // never itself carry a shifted hour — it can only be absent entirely.
+    let typedTimeStr: string | undefined;
     if (hasTime && parsedDateResult) {
       const parsed = parsedDateResult.start.date();
+      typedTimeStr = formatTimeHHmm(parsed);
       anchorDate.setHours(parsed.getHours(), parsed.getMinutes(), 0, 0);
       // "@every friday 3pm" typed on a Friday after 15:00 must not create a
       // task due in the past — advance one period, like chrono's forwardDate
       // does for the plain "@friday 3pm" form
       if (anchorDate.getTime() <= now.getTime()) {
-        if (quickSetting === 'WEEKLY_CURRENT_WEEKDAY') {
+        if (anchorCycle === 'WEEKLY') {
           anchorDate.setDate(anchorDate.getDate() + 7);
-        } else if (quickSetting === 'YEARLY_CURRENT_DATE') {
+        } else if (anchorCycle === 'YEARLY') {
           anchorDate.setFullYear(anchorDate.getFullYear() + 1);
         } else if (anchorDayOfMonth !== undefined) {
           const rolled = getNextDayOfMonthDate(
@@ -855,26 +1059,33 @@ const applyRepeatSyntax = async (
       changes: {
         dueWithTime: anchorDate.getTime(),
         dueDay: null,
-        ...(hasTime ? {} : { hasPlannedTime: false }),
+        ...(hasTime ? { dueTimeStr: typedTimeStr } : { hasPlannedTime: false }),
       },
-      repeatQuickSetting: quickSetting,
+      repeat,
       ranges,
     };
   }
 
   if (parsedDateResult) {
+    const due = parsedDateResult.start.date();
+    // Before skipExcludedWeekend, which can leave a shifted hour behind when
+    // the final landed day itself is a DST transition day (see dueTimeStr).
+    const typedTimeStr = hasTime ? formatTimeHHmm(due) : undefined;
+    if (repeat.type === 'PRESET' && repeat.quickSetting === 'MONDAY_TO_FRIDAY') {
+      skipExcludedWeekend(due);
+    }
     return {
       changes: {
-        dueWithTime: parsedDateResult.start.date().getTime(),
+        dueWithTime: due.getTime(),
         dueDay: null,
-        ...(hasTime ? {} : { hasPlannedTime: false }),
+        ...(hasTime ? { dueTimeStr: typedTimeStr } : { hasPlannedTime: false }),
       },
-      repeatQuickSetting: quickSetting,
+      repeat,
       ranges,
     };
   }
 
-  return { changes: {}, repeatQuickSetting: quickSetting, ranges };
+  return { changes: {}, repeat, ranges };
 };
 
 const parseScheduledDate = (

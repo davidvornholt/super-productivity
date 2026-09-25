@@ -64,8 +64,8 @@ describe('TaskService', () => {
       activeWorkContextId: 'test-project',
       mainListTaskIds$: of(['task-1', 'task-2']),
       backlogTaskIds$: of([]),
-      doneTaskIds$: of([]),
-      doneBacklogTaskIds$: of([]),
+      undoneTaskIds$: of([]),
+      undoneBacklogTaskIds$: of([]),
       startableTasksForActiveContext$: of([]),
       startableTasksForActiveContext: signal([]),
       activeWorkContext$: of({
@@ -816,6 +816,22 @@ describe('TaskService', () => {
       });
 
       expect(task.dueDay).toBeTruthy();
+    });
+
+    // The TODAY default is keyed on `'dueDay' in additional`, not on its value,
+    // so a caller can opt out by passing the key as undefined. addSubTaskTo and
+    // PluginBridgeService.addTask both rely on this to keep a task created
+    // through an API from inheriting a due date from whichever view happens to
+    // be active. Losing it would silently re-date every such task.
+    it('should NOT set dueDay for TODAY tag context when the caller passes the key', () => {
+      const task = service.createNewTaskWithDefaults({
+        title: 'Test',
+        additional: { dueDay: undefined },
+        workContextType: WorkContextType.TAG,
+        workContextId: TODAY_TAG.id,
+      });
+
+      expect(task.dueDay).toBeUndefined();
     });
 
     it('should use custom id if provided', () => {

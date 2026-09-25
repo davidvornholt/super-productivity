@@ -14,6 +14,23 @@ import { waitForStatePersistence } from '../../utils/waits';
 const { ADD_TASK_INPUT, DETAIL_PANEL } = cssSelectors;
 
 test.describe('Keyboard Shortcuts', () => {
+  test('should keep an assigned shortcut after Escape and reload', async ({ page }) => {
+    await page.goto('/#/config?section=keyboard');
+
+    const shortcutInput = page.locator('keyboard-input input').first();
+    await expect(shortcutInput).toBeVisible();
+    const assignedShortcut = await shortcutInput.inputValue();
+    expect(assignedShortcut).not.toBe('');
+
+    await shortcutInput.focus();
+    await page.keyboard.press('Escape');
+    await expect(shortcutInput).toHaveValue(assignedShortcut);
+
+    await page.reload();
+    const reloadedShortcutInput = page.locator('keyboard-input input').first();
+    await expect(reloadedShortcutInput).toHaveValue(assignedShortcut);
+  });
+
   test('should focus add task input with Shift+A', async ({ page, workViewPage }) => {
     await workViewPage.waitForTaskList();
 
@@ -76,6 +93,29 @@ test.describe('Keyboard Shortcuts', () => {
 
     await page.keyboard.press('k');
     await expect(newerTask).toBeFocused();
+  });
+
+  test('should unfocus the current task with Escape', async ({
+    page,
+    workViewPage,
+    taskPage,
+    testPrefix,
+  }) => {
+    await workViewPage.waitForTaskList();
+
+    const taskName = `${testPrefix}-Escape Task`;
+    await workViewPage.addTask(taskName);
+
+    const task = taskPage.getTaskByText(taskName);
+    await task.focus();
+    await expect(task).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(task).not.toBeFocused();
+
+    // With no task focused, the navigation keys stop moving focus around.
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('task:focus')).toHaveCount(0);
   });
 
   test('should mark a focused task done with D', async ({
