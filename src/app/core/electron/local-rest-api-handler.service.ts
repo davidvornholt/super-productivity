@@ -11,14 +11,24 @@ import { TaskArchiveService } from '../../features/archive/task-archive.service'
 // eslint-disable-next-line @typescript-eslint/no-restricted-imports -- grandfathered layer-boundary debt
 import { ProjectService } from '../../features/project/project.service';
 // eslint-disable-next-line @typescript-eslint/no-restricted-imports -- grandfathered layer-boundary debt
-import { TagService } from '../../features/tag/tag.service';
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- grandfathered layer-boundary debt
 import { TODAY_TAG } from '../../features/tag/tag.const';
 import { DateService } from '../date/date.service';
 import { isTodayWithOffset } from '../../util/is-today.util';
 import { isValidDBDateStr } from '../../util/get-db-date-str';
 import { IssueLog } from '../log';
 import { LOCAL_REST_API_FEATURE_BRIDGE } from './local-rest-api-feature-bridge';
+import { LOCAL_REST_API_ROUTE_HANDLERS } from './local-rest-api-route-handlers';
+import {
+  FieldTypeError,
+  createErrorResponse,
+  createSuccessResponse,
+  getPathSegments,
+  getQueryParam,
+  hasOwn,
+  isRecord,
+  pickFields,
+  toFieldTypeErrors,
+} from './local-rest-api-response.util';
 
 import { TaskSharedActions } from '../../root-store/meta/task-shared.actions';
 // eslint-disable-next-line @typescript-eslint/no-restricted-imports -- grandfathered layer-boundary debt
@@ -39,9 +49,6 @@ import {
   LocalRestApiRequestPayload,
   LocalRestApiResponsePayload,
 } from '../../../../electron/shared-with-frontend/local-rest-api.model';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Only these fields may be set via the REST API to prevent state corruption. */
 const ALLOWED_TASK_FIELDS = new Set<string>([
@@ -76,15 +83,8 @@ const REJECTED_TASK_FIELDS = ['parentId', 'subTaskIds'] as const;
  */
 const SUBTASK_INHERITED_FIELDS = ['projectId', 'tagIds'] as const;
 
-const pickAllowedFields = (body: Record<string, unknown>): Partial<Task> => {
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(body)) {
-    if (ALLOWED_TASK_FIELDS.has(key)) {
-      result[key] = body[key];
-    }
-  }
-  return result as Partial<Task>;
-};
+const pickAllowedFields = (body: Record<string, unknown>): Partial<Task> =>
+  pickFields(body, ALLOWED_TASK_FIELDS) as Partial<Task>;
 
 /**
  * Value-level types for the fields writable via the REST API. Keys mirror
@@ -110,8 +110,6 @@ interface WritableTaskFields {
   deadlineRemindAt?: number | null;
 }
 
-type FieldTypeError = { path: string; expected: string };
-
 /**
  * Validates the value types of already-key-filtered task fields. The create
  * path is separately guarded by `typia.assert<Task>` in the task service (a
@@ -125,10 +123,7 @@ const validateWritableFields = (
   if (result.success) {
     return { ok: true };
   }
-  return {
-    ok: false,
-    errors: result.errors.map((e) => ({ path: e.path, expected: e.expected })),
-  };
+  return { ok: false, errors: toFieldTypeErrors(result.errors) };
 };
 
 const DEADLINE_FIELDS = ['deadlineDay', 'deadlineWithTime', 'deadlineRemindAt'] as const;
@@ -144,9 +139,6 @@ type DeadlineChange =
     }
   | { type: 'clearReminder' }
   | { type: 'remove' };
-
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
 
 const validateDeadlineFields = (
   fields: Partial<WritableTaskFields>,
@@ -293,15 +285,6 @@ const resolveDeadlineChange = (
 const firstRejectedField = (body: Record<string, unknown>): string | undefined =>
   REJECTED_TASK_FIELDS.find((field) => field in body);
 
-const getQueryParam = (
-  query: Record<string, string | string[]>,
-  key: string,
-): string | undefined => {
-  const value = query[key];
-  if (value === undefined) return undefined;
-  return Array.isArray(value) ? value[0] : value;
-};
-
 /**
  * `isIgnoreShortSyntax: true` in a POST/PATCH body stores the title literally:
  * `#tag`, `+project`, `30m`, `@date` and URLs are not parsed out of it. Opt-in
@@ -335,38 +318,6 @@ const getQueryParamAsBoolean = (
   return value.toLowerCase() === 'true';
 };
 
-const createErrorResponse = (
-  requestId: string,
-  status: number,
-  code: string,
-  message: string,
-  details?: unknown,
-): LocalRestApiResponsePayload => ({
-  requestId,
-  status,
-  body: {
-    ok: false,
-    error: {
-      code,
-      message,
-      details,
-    },
-  },
-});
-
-const createSuccessResponse = (
-  requestId: string,
-  status: number,
-  data: unknown,
-): LocalRestApiResponsePayload => ({
-  requestId,
-  status,
-  body: {
-    ok: true,
-    data,
-  },
-});
-
 type TaskSource = 'active' | 'archived' | 'all';
 
 /**
@@ -398,9 +349,10 @@ export class LocalRestApiHandlerService {
   private readonly _taskService = inject(TaskService);
   private readonly _taskArchiveService = inject(TaskArchiveService);
   private readonly _projectService = inject(ProjectService);
-  private readonly _tagService = inject(TagService);
   private readonly _dateService = inject(DateService);
   private readonly _featureBridge = inject(LOCAL_REST_API_FEATURE_BRIDGE);
+  private readonly _routeHandlers =
+    inject(LOCAL_REST_API_ROUTE_HANDLERS, { optional: true }) ?? [];
   private readonly _store = inject(Store);
   private _isInitialized = false;
 
@@ -463,7 +415,7 @@ export class LocalRestApiHandlerService {
     payload: LocalRestApiRequestPayload,
   ): Promise<LocalRestApiResponsePayload> {
     const { method, path, requestId, body, query } = payload;
-    const segments = path.split('/').filter(Boolean);
+    const segments = getPathSegments(path);
 
     if (method === 'GET' && path === '/status') {
       return this._handleGetStatus(requestId);
@@ -494,15 +446,23 @@ export class LocalRestApiHandlerService {
     }
 
     if (segments[0] === 'tasks' && segments[1] && segments.length >= 2) {
-      return this._handleTaskRoutes(method, segments, requestId, body, query);
+      const taskResponse = await this._handleTaskRoutes(
+        method,
+        segments,
+        requestId,
+        body,
+        query,
+      );
+      if (taskResponse) {
+        return taskResponse;
+      }
     }
 
-    if (method === 'GET' && path === '/projects') {
-      return this._handleListProjects(requestId, query);
-    }
-
-    if (method === 'GET' && path === '/tags') {
-      return this._handleListTags(requestId, query);
+    for (const routeHandler of this._routeHandlers) {
+      const response = await routeHandler.handle(payload);
+      if (response) {
+        return response;
+      }
     }
 
     return createErrorResponse(requestId, 404, 'NOT_FOUND', 'Route not found');
@@ -803,7 +763,7 @@ export class LocalRestApiHandlerService {
     requestId: string,
     body: unknown,
     query: Record<string, string | string[]>,
-  ): Promise<LocalRestApiResponsePayload> {
+  ): Promise<LocalRestApiResponsePayload | undefined> {
     const taskId = segments[1];
 
     if (segments.length === 2) {
@@ -992,7 +952,8 @@ export class LocalRestApiHandlerService {
       return this._handleRestoreTask(requestId, taskId);
     }
 
-    return createErrorResponse(requestId, 404, 'NOT_FOUND', 'Route not found');
+    // Not a core task route — a feature route handler may own it.
+    return undefined;
   }
 
   private async _handleArchiveTask(
@@ -1037,38 +998,6 @@ export class LocalRestApiHandlerService {
     this._taskService.restoreTask(archivedTask, subTasks);
     const restoredTask = await this._getTaskById(taskId);
     return createSuccessResponse(requestId, 200, restoredTask);
-  }
-
-  private async _handleListProjects(
-    requestId: string,
-    query: Record<string, string | string[]>,
-  ): Promise<LocalRestApiResponsePayload> {
-    const queryText = getQueryParam(query, 'query');
-
-    let projects = await firstValueFrom(this._projectService.list$);
-
-    if (queryText) {
-      const lowerQuery = queryText.toLowerCase();
-      projects = projects.filter((p) => p.title.toLowerCase().includes(lowerQuery));
-    }
-
-    return createSuccessResponse(requestId, 200, projects);
-  }
-
-  private async _handleListTags(
-    requestId: string,
-    query: Record<string, string | string[]>,
-  ): Promise<LocalRestApiResponsePayload> {
-    const queryText = getQueryParam(query, 'query');
-
-    let tags = await firstValueFrom(this._tagService.tags$);
-
-    if (queryText) {
-      const lowerQuery = queryText.toLowerCase();
-      tags = tags.filter((t) => t.title.toLowerCase().includes(lowerQuery));
-    }
-
-    return createSuccessResponse(requestId, 200, tags);
   }
 
   /**
