@@ -93,6 +93,7 @@ import { LOCAL_REST_API_FEATURE_BRIDGE } from './app/core/electron/local-rest-ap
 import { LOCAL_REST_API_ROUTE_HANDLERS } from './app/core/electron/local-rest-api-route-handlers';
 import { LocalRestApiProjectRoutesService } from './app/features/project/local-rest-api-project-routes.service';
 import { LocalRestApiTagRoutesService } from './app/features/tag/local-rest-api-tag-routes.service';
+import { LocalRestApiSimpleCounterRoutesService } from './app/features/simple-counter/local-rest-api-simple-counter-routes.service';
 import { PluginOAuthRedirectHandler } from './app/plugins/oauth/plugin-oauth-redirect.handler';
 import { OAuthCallbackHandlerService } from './app/imex/sync/oauth-callback-handler.service';
 import { GlobalConfigService } from './app/features/config/global-config.service';
@@ -243,6 +244,11 @@ bootstrapApplication(AppComponent, {
     {
       provide: LOCAL_REST_API_ROUTE_HANDLERS,
       useClass: LocalRestApiTagRoutesService,
+      multi: true,
+    },
+    {
+      provide: LOCAL_REST_API_ROUTE_HANDLERS,
+      useClass: LocalRestApiSimpleCounterRoutesService,
       multi: true,
     },
     {
