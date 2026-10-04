@@ -1097,7 +1097,8 @@
         "PLACEHOLDER": "Select folder"
       },
       "S": {
-        "SORTED": "Projects sorted A–Z"
+        "SORTED": "Projects sorted A–Z",
+        "SORT_UNDO_STALE": "Projects changed after sorting, so the sort can no longer be undone"
       },
       "SORT": "Sort projects A–Z",
       "TOOLTIP_CREATE": "Create project folder",
@@ -1774,7 +1775,8 @@
         "PLACEHOLDER": "Select folder"
       },
       "S": {
-        "SORTED": "Tags sorted A–Z"
+        "SORTED": "Tags sorted A–Z",
+        "SORT_UNDO_STALE": "Tags changed after sorting, so the sort can no longer be undone"
       },
       "TOOLTIP_CREATE": "Create tag folder",
       "TOOLTIP_SORT": "Sort tags A–Z",

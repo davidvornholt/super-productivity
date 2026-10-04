@@ -17,22 +17,25 @@
   overflow: clip;
 
   // Hide additional buttons by default on desktop
-  // Use visibility instead of display:none to keep element in layout flow
+  // Use opacity instead of display:none to keep element in layout flow
   // This ensures getBoundingClientRect() returns correct values for mat-menu positioning (#5955)
+  // Not visibility:hidden either: that drops the buttons from the Tab order.
   .additional-btns {
-    visibility: hidden;
+    opacity: 0;
     pointer-events: none;
 
     @include touchPrimaryDevice() {
-      visibility: visible;
+      opacity: 1;
       pointer-events: auto;
     }
   }
 
-  // Show additional buttons on focus/hover (desktop)
-  //&:focus-within .additional-btns,
+  // Show additional buttons on hover or keyboard focus (desktop).
+  // :focus-visible rather than :focus-within, so a mouse click on the header
+  // doesn't leave them showing.
+  &:has(:focus-visible) .additional-btns,
   &:hover .additional-btns {
-    visibility: visible;
+    opacity: 1;
     pointer-events: auto;
   }
 
