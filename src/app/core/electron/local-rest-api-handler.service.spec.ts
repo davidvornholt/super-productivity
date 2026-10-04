@@ -6,12 +6,15 @@ import { TaskService } from '../../features/tasks/task.service';
 import { TaskArchiveService } from '../../features/archive/task-archive.service';
 import { ProjectService } from '../../features/project/project.service';
 import { Project } from '../../features/project/project.model';
-import { TagService } from '../../features/tag/tag.service';
 import { IssueLog } from '../log';
 import {
   LOCAL_REST_API_FEATURE_BRIDGE,
   LocalRestApiFeatureBridge,
 } from './local-rest-api-feature-bridge';
+import {
+  LOCAL_REST_API_ROUTE_HANDLERS,
+  LocalRestApiRouteHandler,
+} from './local-rest-api-route-handlers';
 import { TODAY_TAG } from '../../features/tag/tag.const';
 import { DateService } from '../date/date.service';
 import { Task, TaskWithSubTasks, TaskArchive } from '../../features/tasks/task.model';
@@ -38,7 +41,8 @@ describe('LocalRestApiHandlerService', () => {
   let taskServiceMock: jasmine.SpyObj<TaskService>;
   let taskArchiveServiceMock: jasmine.SpyObj<TaskArchiveService>;
   let projectServiceMock: jasmine.SpyObj<ProjectService>;
-  let tagServiceMock: jasmine.SpyObj<TagService>;
+  let firstRouteHandlerMock: jasmine.SpyObj<LocalRestApiRouteHandler>;
+  let secondRouteHandlerMock: jasmine.SpyObj<LocalRestApiRouteHandler>;
   let dateServiceMock: jasmine.SpyObj<DateService>;
   let featureBridgeMock: jasmine.SpyObj<LocalRestApiFeatureBridge>;
   let store: MockStore;
@@ -202,13 +206,16 @@ describe('LocalRestApiHandlerService', () => {
       value: (() => activeProjects) as ProjectService['list'],
     });
 
-    tagServiceMock = jasmine.createSpyObj(
-      'TagService',
-      ['addTag', 'updateTag', 'deleteTag'],
-      {
-        tags$: of([]),
-      },
+    firstRouteHandlerMock = jasmine.createSpyObj<LocalRestApiRouteHandler>(
+      'FirstRouteHandler',
+      ['handle'],
     );
+    firstRouteHandlerMock.handle.and.returnValue(Promise.resolve(undefined));
+    secondRouteHandlerMock = jasmine.createSpyObj<LocalRestApiRouteHandler>(
+      'SecondRouteHandler',
+      ['handle'],
+    );
+    secondRouteHandlerMock.handle.and.returnValue(Promise.resolve(undefined));
 
     dateServiceMock = jasmine.createSpyObj<DateService>(
       'DateService',
@@ -230,9 +237,18 @@ describe('LocalRestApiHandlerService', () => {
         { provide: TaskService, useValue: taskServiceMock },
         { provide: TaskArchiveService, useValue: taskArchiveServiceMock },
         { provide: ProjectService, useValue: projectServiceMock },
-        { provide: TagService, useValue: tagServiceMock },
         { provide: DateService, useValue: dateServiceMock },
         { provide: LOCAL_REST_API_FEATURE_BRIDGE, useValue: featureBridgeMock },
+        {
+          provide: LOCAL_REST_API_ROUTE_HANDLERS,
+          useValue: firstRouteHandlerMock,
+          multi: true,
+        },
+        {
+          provide: LOCAL_REST_API_ROUTE_HANDLERS,
+          useValue: secondRouteHandlerMock,
+          multi: true,
+        },
         provideMockStore({ initialState: { focusMode: initialFocusModeState } }),
       ],
     });
@@ -2524,71 +2540,103 @@ describe('LocalRestApiHandlerService', () => {
     });
   });
 
-  describe('project routes', () => {
+  describe('feature route handlers', () => {
+    const featureResponse = (
+      status: number,
+      data: unknown,
+    ): LocalRestApiResponsePayload => ({
+      requestId: 'test-request-id',
+      status,
+      body: { ok: true, data },
+    });
+
     beforeEach(() => {
       service.init();
     });
 
-    describe('GET /projects', () => {
-      it('should return all projects', async () => {
-        const projects = [
-          { id: 'p1', title: 'Project 1' },
-          { id: 'p2', title: 'Project 2' },
-        ];
-        Object.defineProperty(projectServiceMock, 'list$', { get: () => of(projects) });
+    it('should answer with the response of the handler that owns the route', async () => {
+      const request = createRequest('GET', '/projects', { query: { query: 'work' } });
+      firstRouteHandlerMock.handle.and.returnValue(
+        Promise.resolve(featureResponse(200, [{ id: 'p1' }])),
+      );
 
-        const response = await sendRequestAndWait(createRequest('GET', '/projects'));
+      const response = await sendRequestAndWait(request);
 
-        expect(response.body.ok).toBe(true);
-      });
-
-      it('should filter projects by query', async () => {
-        const projects = [
-          { id: 'p1', title: 'Work' },
-          { id: 'p2', title: 'Personal' },
-        ];
-        Object.defineProperty(projectServiceMock, 'list$', { get: () => of(projects) });
-
-        const response = await sendRequestAndWait(
-          createRequest('GET', '/projects', { query: { query: 'work' } }),
-        );
-
-        expect(response.body.ok).toBe(true);
-      });
-    });
-  });
-
-  describe('tag routes', () => {
-    beforeEach(() => {
-      service.init();
+      expect(firstRouteHandlerMock.handle).toHaveBeenCalledWith(request);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ ok: true, data: [{ id: 'p1' }] });
+      expect(secondRouteHandlerMock.handle).not.toHaveBeenCalled();
     });
 
-    describe('GET /tags', () => {
-      it('should return all tags', async () => {
-        const tags = [
-          { id: 't1', title: 'Tag 1' },
-          { id: 't2', title: 'Tag 2' },
-        ];
-        Object.defineProperty(tagServiceMock, 'tags$', { get: () => of(tags) });
+    it('should ask the next handler when one does not own the route', async () => {
+      secondRouteHandlerMock.handle.and.returnValue(
+        Promise.resolve(featureResponse(201, { id: 't1' })),
+      );
 
-        const response = await sendRequestAndWait(createRequest('GET', '/tags'));
+      const response = await sendRequestAndWait(createRequest('POST', '/tags'));
 
-        expect(response.body.ok).toBe(true);
-      });
+      expect(firstRouteHandlerMock.handle).toHaveBeenCalled();
+      expect(response.status).toBe(201);
+      expect(response.body).toEqual({ ok: true, data: { id: 't1' } });
+    });
 
-      it('should filter tags by query', async () => {
-        const tags = [
-          { id: 't1', title: 'Urgent' },
-          { id: 't2', title: 'Important' },
-        ];
-        Object.defineProperty(tagServiceMock, 'tags$', { get: () => of(tags) });
+    it('should return 404 when no handler owns the route', async () => {
+      const response = await sendRequestAndWait(createRequest('GET', '/projects'));
 
-        const response = await sendRequestAndWait(
-          createRequest('GET', '/tags', { query: { query: 'urgent' } }),
-        );
+      expect(firstRouteHandlerMock.handle).toHaveBeenCalled();
+      expect(secondRouteHandlerMock.handle).toHaveBeenCalled();
+      expect(response.status).toBe(404);
+      expect((response.body as any).error.code).toBe('NOT_FOUND');
+    });
 
-        expect(response.body.ok).toBe(true);
-      });
+    it('should not consult handlers for core routes', async () => {
+      const response = await sendRequestAndWait(createRequest('GET', '/status'));
+
+      expect(response.status).toBe(200);
+      expect(firstRouteHandlerMock.handle).not.toHaveBeenCalled();
+      expect(secondRouteHandlerMock.handle).not.toHaveBeenCalled();
+    });
+
+    it('should not consult handlers for core task routes', async () => {
+      const response = await sendRequestAndWait(
+        createRequest('GET', '/tasks/missing-task'),
+      );
+
+      expect(response.status).toBe(404);
+      expect((response.body as any).error.code).toBe('TASK_NOT_FOUND');
+      expect(firstRouteHandlerMock.handle).not.toHaveBeenCalled();
+    });
+
+    it('should let a handler own a sub-route of /tasks/:id', async () => {
+      const request = createRequest('POST', '/tasks/task-1/feature-route');
+      firstRouteHandlerMock.handle.and.returnValue(
+        Promise.resolve(featureResponse(200, { id: 'task-1' })),
+      );
+
+      const response = await sendRequestAndWait(request);
+
+      expect(firstRouteHandlerMock.handle).toHaveBeenCalledWith(request);
+      expect(response.status).toBe(200);
+    });
+
+    it('should return 404 for an unknown sub-route of /tasks/:id', async () => {
+      const response = await sendRequestAndWait(
+        createRequest('POST', '/tasks/task-1/unknown'),
+      );
+
+      expect(response.status).toBe(404);
+      expect((response.body as any).error.code).toBe('NOT_FOUND');
+    });
+
+    it('should return 500 when a handler throws', async () => {
+      firstRouteHandlerMock.handle.and.returnValue(
+        Promise.reject(new Error('Handler failed')),
+      );
+
+      const response = await sendRequestAndWait(createRequest('GET', '/projects'));
+
+      expect(response.status).toBe(500);
+      expect((response.body as any).error.code).toBe('INTERNAL_ERROR');
     });
   });
 
