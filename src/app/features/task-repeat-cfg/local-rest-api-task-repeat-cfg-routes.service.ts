@@ -84,6 +84,13 @@ const CREATE_KEYS: ReadonlySet<string> = new Set([...UPDATE_KEYS, 'taskId']);
 /** The repeat dialog's limits for "repeat every". */
 const MAX_REPEAT_EVERY = 1000;
 
+/**
+ * `Date` reads the years 0 to 99 as 1900 to 1999, and `getDbDateStr` writes
+ * years before 1000 without padding, so a preset can only expand a start date
+ * with a four-digit year.
+ */
+const MIN_START_DATE = '1000-01-01';
+
 type Result<T> =
   | { ok: true; value: T }
   | { ok: false; response: LocalRestApiResponsePayload };
@@ -360,6 +367,15 @@ export class LocalRestApiTaskRepeatCfgRoutesService implements LocalRestApiFeatu
         response: this._invalid(requestId, 'startDate must be a valid YYYY-MM-DD date'),
       };
     }
+    if (startDate !== undefined && startDate < MIN_START_DATE) {
+      return {
+        ok: false,
+        response: this._invalid(
+          requestId,
+          `startDate must not be before ${MIN_START_DATE}`,
+        ),
+      };
+    }
     if (
       custom.repeatEvery !== undefined &&
       (!Number.isInteger(custom.repeatEvery) ||
@@ -387,6 +403,17 @@ export class LocalRestApiTaskRepeatCfgRoutesService implements LocalRestApiFeatu
         result.startDate ? dateStrToUtcDate(result.startDate) : undefined,
       );
       result = { ...result, ...presetUpdates };
+    }
+    // A preset can move the start date out of range: the next 1st after
+    // December 9999 is in the year 10000.
+    if (result.startDate !== undefined && !isValidDBDateStr(result.startDate)) {
+      return {
+        ok: false,
+        response: this._invalid(
+          requestId,
+          `quickSetting "${quickSetting}" gives the invalid startDate ${result.startDate}`,
+        ),
+      };
     }
     if (result.monthlyLastDay && quickSetting !== 'MONTHLY_LAST_DAY') {
       result = { ...result, monthlyLastDay: undefined };

@@ -421,6 +421,20 @@ describe('LocalRestApiTaskRepeatCfgRoutesService', () => {
       expectNoDispatch();
     });
 
+    it('rejects a preset that moves the start date past 9999', async () => {
+      const response = await handle(
+        request('POST', '/task-repeat-cfgs', {
+          taskId: 't1',
+          quickSetting: 'MONTHLY_FIRST_DAY',
+          startDate: '9999-12-15',
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(errorCode(response)).toBe('INVALID_INPUT');
+      expectNoDispatch();
+    });
+
     it('rejects tasks the repeat dialog does not offer repeating for', async () => {
       for (const taskId of ['sub', 'issue', 'repeating']) {
         const response = await handle(request('POST', '/task-repeat-cfgs', { taskId }));
@@ -541,6 +555,43 @@ describe('LocalRestApiTaskRepeatCfgRoutesService', () => {
       expect(repeatCfgServiceMock.updateTaskRepeatCfg).toHaveBeenCalledOnceWith(
         'daily',
         { startDate: '2026-01-01' },
+        false,
+      );
+    });
+
+    it('rejects start dates a preset cannot expand', async () => {
+      for (const startDate of ['0099-01-01', '0999-12-31']) {
+        const response = await handle(
+          request('PATCH', '/task-repeat-cfgs/daily', {
+            quickSetting: 'MONTHLY_CURRENT_DATE',
+            startDate,
+          }),
+        );
+        expect(response.status).toBe(400);
+        expect(errorCode(response)).toBe('INVALID_INPUT');
+      }
+      const pastLastYear = await handle(
+        request('PATCH', '/task-repeat-cfgs/daily', {
+          quickSetting: 'MONTHLY_FIRST_DAY',
+          startDate: '9999-12-15',
+        }),
+      );
+      expect(pastLastYear.status).toBe(400);
+      expect(errorCode(pastLastYear)).toBe('INVALID_INPUT');
+      expectNoDispatch();
+    });
+
+    it('expands a preset for the earliest supported start date', async () => {
+      await handle(
+        request('PATCH', '/task-repeat-cfgs/daily', {
+          quickSetting: 'MONTHLY_CURRENT_DATE',
+          startDate: '1000-01-01',
+        }),
+      );
+
+      expect(repeatCfgServiceMock.updateTaskRepeatCfg).toHaveBeenCalledOnceWith(
+        'daily',
+        jasmine.objectContaining({ repeatCycle: 'MONTHLY', startDate: '1000-01-01' }),
         false,
       );
     });
