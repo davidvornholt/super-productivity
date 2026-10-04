@@ -3,12 +3,14 @@ import {
   ChangeDetectorRef,
   Component,
   computed,
+  effect,
   ElementRef,
   inject,
   input,
   OnDestroy,
   OnInit,
   Renderer2,
+  signal,
   viewChild,
 } from '@angular/core';
 import { MatMiniFabButton } from '@angular/material/button';
@@ -22,6 +24,11 @@ import { T } from '../../../t.const';
 import { TaskService } from '../../../features/tasks/task.service';
 import { animationFrameScheduler, Subscription } from 'rxjs';
 import { distinctUntilChanged, observeOn } from 'rxjs/operators';
+
+// A looping CSS animation keeps Chromium producing frames for as long as a task
+// is tracked (measured 2026-10: ~25% of a CPU core on Linux while the window is
+// visible). Pulsing now and then keeps the cue at a fraction of that cost.
+const PULSE_INTERVAL_MS = 30_000;
 
 @Component({
   selector: 'play-button',
@@ -39,7 +46,11 @@ import { distinctUntilChanged, observeOn } from 'rxjs/operators';
   template: `
     <div class="play-btn-wrapper">
       @if (currentTaskId()) {
-        <div class="pulse-circle"></div>
+        <div
+          class="pulse-circle"
+          [class.is-pulsing]="isPulsing()"
+          (animationend)="isPulsing.set(false)"
+        ></div>
       }
 
       @if (hasTimeEstimate) {
@@ -138,10 +149,19 @@ import { distinctUntilChanged, observeOn } from 'rxjs/operators';
           bottom: 0;
           border-radius: 50%;
           margin: auto;
-          transform: scale(1, 1);
-          animation: pulse 2s infinite;
+          transform: scale(0.7);
           background: var(--c-accent);
           opacity: 0.6;
+
+          &.is-pulsing {
+            animation: pulse 2s;
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            &.is-pulsing {
+              animation: none;
+            }
+          }
         }
 
         .circle-svg {
@@ -210,6 +230,23 @@ export class PlayButtonComponent implements OnInit, OnDestroy {
   readonly tooltipText = computed(() =>
     this.isDisabled() ? T.MH.NO_TASKS_TO_TRACK : T.MH.TOGGLE_TRACK_TIME,
   );
+
+  /** Set to start one pulse; cleared again when its animation ends. */
+  readonly isPulsing = signal(false);
+  private readonly _pulseWhileTracking = effect((onCleanup) => {
+    if (!this.currentTaskId()) {
+      return;
+    }
+    this.isPulsing.set(true);
+    const intervalId = window.setInterval(
+      () => this.isPulsing.set(true),
+      PULSE_INTERVAL_MS,
+    );
+    onCleanup(() => {
+      window.clearInterval(intervalId);
+      this.isPulsing.set(false);
+    });
+  });
 
   private _subs = new Subscription();
   private circumference = 10 * 2 * Math.PI; // ~62.83
