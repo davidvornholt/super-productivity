@@ -90,8 +90,8 @@ export class NavListTreeComponent implements OnDestroy {
   readonly allUnarchivedProjects = this._navConfigService.allUnarchivedProjects;
   readonly archivedProjectsCount = this._navConfigService.archivedProjectsCount;
 
-  // ViewChild for visibility menu trigger to close menu after toggling
-  visibilityMenuTrigger = viewChild('visibilityBtn', { read: MatMenuTrigger });
+  // ViewChild for the section menu trigger to close menu after toggling
+  moreMenuTrigger = viewChild('moreBtn', { read: MatMenuTrigger });
 
   readonly treeNodes = signal<TreeNode<MenuTreeViewNode>[]>([]);
   readonly treeKind = computed<MenuTreeKind>(() => this.item().treeKind);
@@ -143,15 +143,11 @@ export class NavListTreeComponent implements OnDestroy {
   toggleProjectVisibility(projectId: string): void {
     this._navConfigService.toggleProjectVisibility(projectId);
     // Close menu to prevent stale positioning after DOM update (#5955)
-    this.visibilityMenuTrigger()?.closeMenu();
-  }
-
-  sortProjects(): void {
-    this._navConfigService.sortProjectTree();
+    this.moreMenuTrigger()?.closeMenu();
   }
 
   goToArchivedProjects(): void {
-    this.visibilityMenuTrigger()?.closeMenu();
+    this.moreMenuTrigger()?.closeMenu();
     this._router.navigateByUrl('/archived-projects');
   }
 
