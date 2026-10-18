@@ -14,6 +14,7 @@ import {
   createErrorResponse,
   createSuccessResponse,
 } from '../../core/electron/local-rest-api-response';
+import { DEFAULT_TAG_COLOR } from '../work-context/work-context.const';
 import { TODAY_TAG } from './tag.const';
 import { Tag } from './tag.model';
 import { TagService } from './tag.service';
@@ -21,13 +22,17 @@ import { TagService } from './tag.service';
 interface UpdateTagFields {
   title?: string;
   icon?: string | null;
+  color?: string;
 }
 
 interface CreateTagFields extends UpdateTagFields {
   title: string;
 }
 
-const WRITABLE_KEYS: ReadonlySet<string> = new Set(['title', 'icon']);
+const WRITABLE_KEYS: ReadonlySet<string> = new Set(['title', 'icon', 'color']);
+
+/** The format the tag settings dialog's color picker produces. */
+const HEX_COLOR_REGEX = /^#[0-9a-f]{6}$/i;
 
 /**
  * Trims and drops leading '#', which a user types out of habit: the task
@@ -38,9 +43,9 @@ const normalizeTagTitle = (title: string): string =>
   title.trim().replace(/^#+/, '').trim();
 
 /**
- * Local REST API write routes under `/tags`. `GET /tags` is served by the core
- * handler before feature routes run, so this only handles POST, PATCH and
- * DELETE.
+ * Local REST API routes under `/tags`. `GET /tags` is served by the core
+ * handler before feature routes run, so this handles `GET /tags/:id` and the
+ * writes.
  */
 @Injectable()
 export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
@@ -61,6 +66,9 @@ export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
 
     if (segments.length === 2) {
       const tagId = segments[1];
+      if (method === 'GET') {
+        return this._handleGet(requestId, tagId);
+      }
       if (method === 'PATCH') {
         return this._handleUpdate(requestId, tagId, body);
       }
@@ -70,6 +78,17 @@ export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
     }
 
     return undefined;
+  }
+
+  private async _handleGet(
+    requestId: string,
+    tagId: string,
+  ): Promise<LocalRestApiResponsePayload> {
+    const tag = await this._getTag(tagId);
+    if (!tag) {
+      return this._tagNotFound(requestId);
+    }
+    return createSuccessResponse(requestId, 200, tag);
   }
 
   private async _handleCreate(
@@ -82,7 +101,7 @@ export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
     if (!parsed.ok) {
       return parsed.response;
     }
-    const { title, icon } = parsed.value;
+    const { title, icon, color } = parsed.value;
 
     // The task editor's tag field reuses a tag of the same title instead of
     // adding a second one; a caller that wants that gets the id from here.
@@ -91,10 +110,12 @@ export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
       return this._tagExists(requestId, existing);
     }
 
-    // Like the create-tag dialog: color and theme come from the defaults.
+    // Like the create-tag dialog: without a color, addTag picks a preset one.
+    // The theme keeps its default primary, which the tag color overrides.
     const tagId = this._tagService.addTag({
       title,
       ...(icon !== undefined ? { icon } : {}),
+      ...(color !== undefined ? { color } : {}),
     });
 
     return createSuccessResponse(requestId, 201, await this._getTag(tagId));
@@ -132,7 +153,7 @@ export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
     if (Object.keys(parsed.value).length > 0) {
       // The caller gets the result in the response; the app's "Tag updated"
       // snack would only interrupt whoever is using it.
-      this._tagService.updateTag(tagId, parsed.value, true);
+      this._tagService.updateTag(tagId, this._withThemePrimary(tag, parsed.value), true);
     }
 
     return createSuccessResponse(requestId, 200, await this._getTag(tagId));
@@ -162,9 +183,24 @@ export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
   }
 
   /**
-   * Rejects a non-object body and keys other than title and icon, then
+   * Like the tag settings dialog: theme.primary follows a new color unless the
+   * user picked a different primary color on purpose.
+   */
+  private _withThemePrimary(tag: Tag, changes: UpdateTagFields): Partial<Tag> {
+    const { color } = changes;
+    const primary = tag.theme?.primary;
+    const isPrimaryCustomized = primary !== DEFAULT_TAG_COLOR && primary !== tag.color;
+    if (color === undefined || isPrimaryCustomized) {
+      return changes;
+    }
+    return { ...changes, theme: { ...tag.theme, primary: color } };
+  }
+
+  /**
+   * Rejects a non-object body and keys other than title, icon and color, then
    * type-checks the rest. A title, where given, is normalized like one typed
-   * in the app and must not end up empty.
+   * in the app and must not end up empty. A color must be a `#rrggbb` hex
+   * color and is stored in lower case, as the color picker stores it.
    */
   private _parseBody<T extends UpdateTagFields>(
     requestId: string,
@@ -172,20 +208,33 @@ export class LocalRestApiTagRoutesService implements LocalRestApiFeatureRoutes {
     validate: (body: Record<string, unknown>) => IValidation<T>,
   ): LocalRestApiResult<T> {
     const parsed = parseLocalRestApiBody(requestId, body, WRITABLE_KEYS, validate, 'tag');
-    if (!parsed.ok || parsed.value.title === undefined) {
+    if (!parsed.ok) {
       return parsed;
     }
-    const title = normalizeTagTitle(parsed.value.title);
-    if (!title) {
-      return {
-        ok: false,
-        response: this._invalid(
-          requestId,
-          'title must be a non-empty string, not counting a leading #',
-        ),
-      };
+    let { value } = parsed;
+    if (value.title !== undefined) {
+      const title = normalizeTagTitle(value.title);
+      if (!title) {
+        return {
+          ok: false,
+          response: this._invalid(
+            requestId,
+            'title must be a non-empty string, not counting a leading #',
+          ),
+        };
+      }
+      value = { ...value, title };
     }
-    return { ok: true, value: { ...parsed.value, title } };
+    if (value.color !== undefined) {
+      if (!HEX_COLOR_REGEX.test(value.color)) {
+        return {
+          ok: false,
+          response: this._invalid(requestId, 'color must be a #rrggbb hex color'),
+        };
+      }
+      value = { ...value, color: value.color.toLowerCase() };
+    }
+    return { ok: true, value };
   }
 
   /**

@@ -3,6 +3,7 @@ import { BehaviorSubject } from 'rxjs';
 import { LocalRestApiTagRoutesService } from './local-rest-api-tag-routes.service';
 import { TagService } from './tag.service';
 import { Tag } from './tag.model';
+import { DEFAULT_TAG_COLOR } from '../work-context/work-context.const';
 import {
   DEFAULT_TAG,
   IMPORTANT_TAG,
@@ -101,7 +102,7 @@ describe('LocalRestApiTagRoutesService', () => {
     it('leaves other paths and methods to the rest of the handler', async () => {
       const unowned = [
         request('GET', '/tags'),
-        request('GET', '/tags/t1'),
+        request('GET', '/tags/t1/extra'),
         request('PUT', '/tags/t1', { title: 'x' }),
         request('POST', '/tags/t1', { title: 'x' }),
         request('PATCH', '/tags', { title: 'x' }),
@@ -116,6 +117,38 @@ describe('LocalRestApiTagRoutesService', () => {
           .toBeUndefined();
       }
       expectNoWrite();
+    });
+  });
+
+  describe('GET /tags/:id', () => {
+    it('returns the tag', async () => {
+      const response = await handle(request('GET', '/tags/t1'));
+
+      expect(response.status).toBe(200);
+      expect(data<Tag>(response)).toEqual(tags$.value[1]);
+      expectNoWrite();
+    });
+
+    it('returns the Today tag, as GET /tags lists it', async () => {
+      const response = await handle(request('GET', `/tags/${TODAY_TAG.id}`));
+
+      expect(response.status).toBe(200);
+      expect(data<Tag>(response).id).toBe(TODAY_TAG.id);
+    });
+
+    it('returns 404 for an unknown tag', async () => {
+      const response = await handle(request('GET', '/tags/nope'));
+
+      expect(response.status).toBe(404);
+      expect(errorCode(response)).toBe('TAG_NOT_FOUND');
+    });
+
+    it('returns 404 for prototype property names', async () => {
+      for (const id of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+        const response = await handle(request('GET', `/tags/${id}`));
+        expect(response.status).withContext(id).toBe(404);
+        expect(errorCode(response)).toBe('TAG_NOT_FOUND');
+      }
     });
   });
 
@@ -147,6 +180,36 @@ describe('LocalRestApiTagRoutesService', () => {
 
       expect(response.status).toBe(201);
       expect(tagServiceMock.addTag).toHaveBeenCalledOnceWith({ title: 'X', icon: null });
+    });
+
+    it('passes a color in lower case', async () => {
+      const response = await handle(
+        request('POST', '/tags', { title: 'X', color: '#29A1AA' }),
+      );
+
+      expect(response.status).toBe(201);
+      expect(tagServiceMock.addTag).toHaveBeenCalledOnceWith({
+        title: 'X',
+        color: '#29a1aa',
+      });
+      expect(data<Tag>(response).color).toBe('#29a1aa');
+    });
+
+    it('rejects a color that is not #rrggbb', async () => {
+      for (const color of [
+        '#fff',
+        'red',
+        '29a1aa',
+        '#29a1a',
+        '#29a1aa0',
+        '#29a1ag',
+        '',
+      ]) {
+        const response = await handle(request('POST', '/tags', { title: 'X', color }));
+        expect(response.status).withContext(color).toBe(400);
+        expect(errorCode(response)).toBe('INVALID_INPUT');
+      }
+      expectNoWrite();
     });
 
     it('strips a leading # like the task editor and short syntax do', async () => {
@@ -214,7 +277,12 @@ describe('LocalRestApiTagRoutesService', () => {
     });
 
     it('rejects wrong value types', async () => {
-      for (const body of [{ title: 42 }, { title: 'X', icon: 7 }]) {
+      for (const body of [
+        { title: 42 },
+        { title: 'X', icon: 7 },
+        { title: 'X', color: null },
+        { title: 'X', color: 0xffffff },
+      ]) {
         const response = await handle(request('POST', '/tags', body));
         expect(response.status).withContext(JSON.stringify(body)).toBe(400);
         expect(errorCode(response)).toBe('INVALID_INPUT');
@@ -231,15 +299,19 @@ describe('LocalRestApiTagRoutesService', () => {
       expectNoWrite();
     });
 
-    it('rejects fields other than title and icon', async () => {
+    it('rejects fields other than title, icon and color', async () => {
       const response = await handle(
-        request('POST', '/tags', { title: 'X', color: '#fff', id: 'mine' }),
+        request('POST', '/tags', {
+          title: 'X',
+          theme: { primary: '#ffffff' },
+          id: 'mine',
+        }),
       );
 
       expect(response.status).toBe(400);
       expect(errorCode(response)).toBe('UNSUPPORTED_FIELD');
       expect(response.body.ok ? undefined : response.body.error.details).toEqual({
-        fields: ['color', 'id'],
+        fields: ['theme', 'id'],
       });
       expectNoWrite();
     });
@@ -270,6 +342,77 @@ describe('LocalRestApiTagRoutesService', () => {
         { icon: 'star' },
         true,
       );
+    });
+
+    it('moves theme.primary along with the color while it is the default', async () => {
+      const response = await handle(request('PATCH', '/tags/t1', { color: '#29A1AA' }));
+
+      expect(response.status).toBe(200);
+      expect(tagServiceMock.updateTag).toHaveBeenCalledOnceWith(
+        't1',
+        { color: '#29a1aa', theme: { ...DEFAULT_TAG.theme, primary: '#29a1aa' } },
+        true,
+      );
+      const tag = data<Tag>(response);
+      expect(tag.color).toBe('#29a1aa');
+      expect(tag.theme.primary).toBe('#29a1aa');
+    });
+
+    it('moves theme.primary along with the color while it matches the old color', async () => {
+      tags$.next([
+        ...tags$.value,
+        createTag('t2', {
+          color: '#ef5350',
+          theme: { ...DEFAULT_TAG.theme, primary: '#ef5350' },
+        }),
+      ]);
+
+      await handle(request('PATCH', '/tags/t2', { color: '#29a1aa' }));
+
+      expect(tagServiceMock.updateTag).toHaveBeenCalledOnceWith(
+        't2',
+        { color: '#29a1aa', theme: { ...DEFAULT_TAG.theme, primary: '#29a1aa' } },
+        true,
+      );
+    });
+
+    it('keeps a primary color the user picked on purpose', async () => {
+      tags$.next([
+        ...tags$.value,
+        createTag('t2', {
+          color: '#ef5350',
+          theme: { ...DEFAULT_TAG.theme, primary: '#42a5f5' },
+        }),
+      ]);
+
+      const response = await handle(request('PATCH', '/tags/t2', { color: '#29a1aa' }));
+
+      expect(tagServiceMock.updateTag).toHaveBeenCalledOnceWith(
+        't2',
+        { color: '#29a1aa' },
+        true,
+      );
+      expect(data<Tag>(response).theme.primary).toBe('#42a5f5');
+    });
+
+    it('leaves the theme alone when the color is not changed', async () => {
+      await handle(request('PATCH', '/tags/t1', { title: 'Renamed' }));
+
+      expect(tagServiceMock.updateTag).toHaveBeenCalledOnceWith(
+        't1',
+        { title: 'Renamed' },
+        true,
+      );
+      expect(tags$.value[1].theme.primary).toBe(DEFAULT_TAG_COLOR);
+    });
+
+    it('rejects a color that is not #rrggbb', async () => {
+      for (const color of ['#fff', 'blue', '#29a1aa0']) {
+        const response = await handle(request('PATCH', '/tags/t1', { color }));
+        expect(response.status).withContext(color).toBe(400);
+        expect(errorCode(response)).toBe('INVALID_INPUT');
+      }
+      expectNoWrite();
     });
 
     it('strips a leading # from a new title', async () => {
@@ -379,7 +522,7 @@ describe('LocalRestApiTagRoutesService', () => {
       expectNoWrite();
     });
 
-    it('rejects fields other than title and icon', async () => {
+    it('rejects fields other than title, icon and color', async () => {
       const response = await handle(request('PATCH', '/tags/t1', { taskIds: ['a'] }));
 
       expect(response.status).toBe(400);
