@@ -172,6 +172,15 @@ export class TakeABreakService {
     shareReplay(1),
   );
 
+  // The work view prints this counter in whole minutes. Binding the per-second
+  // value re-rendered the view, and so painted a frame, every second while a
+  // task was tracked, although the printed text changes once a minute.
+  timeWorkingWithoutABreakWholeMinutes$: Observable<number> =
+    this.timeWorkingWithoutABreak$.pipe(
+      map((ms) => Math.floor(ms / 60000) * 60000),
+      distinctUntilChanged(),
+    );
+
   private _triggerLockScreenCounter$: Subject<boolean> = new Subject();
   // NOTE: no throttle here or on the fullscreen blocker below — the real
   // spacing between triggers is distinctUntilChanged() (the subject only

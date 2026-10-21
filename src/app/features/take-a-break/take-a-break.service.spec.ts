@@ -298,6 +298,32 @@ describe('TakeABreakService', () => {
       expect(emitted[emitted.length - 1]).toBe(0);
       sub.unsubscribe();
     });
+
+    it('emits the whole-minute counter only when the minute changes', () => {
+      const oneMinute = 60000;
+      const tickOf = (duration: number): Tick => ({
+        duration,
+        date: '2026-07-28',
+        timestamp: 0,
+      });
+      trackTask();
+      const emitted: number[] = [];
+      const sub = service.timeWorkingWithoutABreakWholeMinutes$.subscribe((v) =>
+        emitted.push(v),
+      );
+      service.otherNoBreakTIme$.next(oneMinute - 2000);
+      tick$.next(tickOf(1000));
+      tick$.next(tickOf(1000));
+      tick$.next(tickOf(1000));
+      tick$.next(tickOf(1000));
+
+      expect(emitted).toEqual([0, oneMinute]);
+
+      service.resetTimer();
+
+      expect(emitted).toEqual([0, oneMinute, 0]);
+      sub.unsubscribe();
+    });
   });
 
   describe('with idle tracking enabled', () => {
