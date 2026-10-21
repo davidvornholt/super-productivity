@@ -6,6 +6,7 @@ import { addSubTask } from './store/task.actions';
 import { selectCurrentTaskWithBufferedTime } from './store/task-time-buffer.selectors';
 import { Task } from './task.model';
 import { TaskService } from './task.service';
+import { TaskTimeSyncService } from './task-time-sync.service';
 
 describe('LocalRestApiFeatureBridgeService', () => {
   let service: LocalRestApiFeatureBridgeService;
@@ -24,6 +25,7 @@ describe('LocalRestApiFeatureBridgeService', () => {
       providers: [
         LocalRestApiFeatureBridgeService,
         { provide: TaskService, useValue: taskServiceMock },
+        { provide: TaskTimeSyncService, useValue: { flushOne: jasmine.createSpy() } },
         { provide: IssueService, useValue: issueServiceMock },
         provideMockStore(),
       ],

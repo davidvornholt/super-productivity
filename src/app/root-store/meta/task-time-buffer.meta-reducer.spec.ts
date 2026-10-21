@@ -22,6 +22,8 @@ import { roundTsToMinutes } from '../../util/round-ts-to-minutes';
 import { taskTimeBufferMetaReducer } from './task-time-buffer.meta-reducer';
 
 const DAY = '2026-01-05';
+const TICK_AT = new Date(2026, 0, 5, 10, 0, 0).getTime();
+const STAMPS = { firstTickAt: TICK_AT, lastTickAt: TICK_AT };
 
 interface TestState {
   [TASK_FEATURE_NAME]: TaskState;
@@ -96,6 +98,7 @@ describe('taskTimeBufferMetaReducer', () => {
     expect(timeSpentOf(state)).toBe(60000);
     expect(state[TIME_TRACKING_FEATURE_KEY]).toBe(initialTimeTrackingState);
     expect(state[TASK_TIME_BUFFER_FEATURE_KEY]).toEqual({
+      ...STAMPS,
       taskId: task.id,
       date: DAY,
       duration: 3000,
@@ -114,7 +117,7 @@ describe('taskTimeBufferMetaReducer', () => {
     );
 
     const state = probingReducer(
-      createState({ taskId: task.id, date: DAY, duration: 3000 }),
+      createState({ ...STAMPS, taskId: task.id, date: DAY, duration: 3000 }),
       unsetCurrentTask(),
     ) as TestState;
 
@@ -128,41 +131,51 @@ describe('taskTimeBufferMetaReducer', () => {
   });
 
   it('stamps the work start and end for the buffered time', () => {
+    jasmine.clock().mockDate(new Date(2026, 0, 6, 10, 0, 0));
     const state = reducer(
-      createState({ taskId: task.id, date: DAY, duration: 3000 }),
+      createState({
+        ...STAMPS,
+        lastTickAt: TICK_AT + 31000,
+        taskId: task.id,
+        date: DAY,
+        duration: 3000,
+      }),
       unsetCurrentTask(),
     );
 
-    const now = roundTsToMinutes(Date.now());
+    const start = roundTsToMinutes(TICK_AT);
+    const end = roundTsToMinutes(TICK_AT + 31000);
     expect(state[TIME_TRACKING_FEATURE_KEY].project['project-1'][DAY]).toEqual(
-      jasmine.objectContaining({ s: now, e: now }),
+      jasmine.objectContaining({ s: start, e: end }),
     );
     expect(state[TIME_TRACKING_FEATURE_KEY].tag['TODAY'][DAY]).toEqual(
-      jasmine.objectContaining({ s: now, e: now }),
+      jasmine.objectContaining({ s: start, e: end }),
     );
   });
 
   it('adds a buffer for another task or day before buffering the new tick', () => {
     const forOtherTask = reducer(
-      createState({ taskId: task.id, date: DAY, duration: 3000 }),
+      createState({ ...STAMPS, taskId: task.id, date: DAY, duration: 3000 }),
       bufferTick(otherTask.id),
     );
     expect(timeSpentOf(forOtherTask)).toBe(63000);
     expect(timeSpentOf(forOtherTask, otherTask.id)).toBe(60000);
     expect(forOtherTask[TASK_TIME_BUFFER_FEATURE_KEY]).toEqual({
+      ...STAMPS,
       taskId: otherTask.id,
       date: DAY,
       duration: 1000,
     });
 
     const forNextDay = reducer(
-      createState({ taskId: task.id, date: DAY, duration: 3000 }),
+      createState({ ...STAMPS, taskId: task.id, date: DAY, duration: 3000 }),
       bufferTick(task.id, '2026-01-06'),
     );
     expect(forNextDay[TASK_FEATURE_NAME].entities[task.id]!.timeSpentOnDay).toEqual({
       [DAY]: 63000,
     });
     expect(forNextDay[TASK_TIME_BUFFER_FEATURE_KEY]).toEqual({
+      ...STAMPS,
       taskId: task.id,
       date: '2026-01-06',
       duration: 1000,
@@ -170,7 +183,7 @@ describe('taskTimeBufferMetaReducer', () => {
   });
 
   it('drops a buffer whose task is gone', () => {
-    const state = createState({ taskId: 'gone', date: DAY, duration: 3000 });
+    const state = createState({ ...STAMPS, taskId: 'gone', date: DAY, duration: 3000 });
 
     const result = reducer(state, unsetCurrentTask());
 

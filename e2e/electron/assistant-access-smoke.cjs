@@ -1,6 +1,10 @@
 // Run after npm run electron:build and npm run buildFrontend:prod:es6.
 // Uses an isolated profile; quit any app using port 3876 before running.
 // Optionally pass a packaged Electron executable as the first argument.
+// For buffered desktop regressions, build Electron, serve the development app,
+// then set BUFFER_REGRESSIONS=1 and E2E_BASE_URL=http://localhost:<port>.
+// BUFFER_CASE optionally selects rest, dialog, undo or context cases.
+// ELECTRON_EXECUTABLE_PATH selects an unpackaged Electron binary (e.g. on NixOS).
 const { _electron: electron, expect } = require('@playwright/test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -73,9 +77,12 @@ async function waitUntilReady() {
 }
 async function launch() {
   app = await electron.launch({
-    ...(process.argv[2] ? { executablePath: process.argv[2] } : {}),
+    ...(process.env.ELECTRON_EXECUTABLE_PATH || process.argv[2]
+      ? { executablePath: process.env.ELECTRON_EXECUTABLE_PATH || process.argv[2] }
+      : {}),
     args: [
       ...(process.argv[2] ? [] : ['.']),
+      ...(process.env.E2E_BASE_URL ? [`--custom-url=${process.env.E2E_BASE_URL}`] : []),
       `--user-data-dir=${profile}`,
       '--no-sandbox',
       '--disable-gpu',
@@ -103,6 +110,255 @@ async function launch() {
       localStorage.setItem(key, 'true');
   });
   return page;
+}
+
+// Focused desktop regressions: run against the development frontend so the
+// existing E2E store reader is available. The clock drives the real tracking
+// interval, buffer, effects, API handler and persistence (no mocked services).
+async function bufferedTimeRegressions(page) {
+  page.setDefaultTimeout(15000);
+  await page.evaluate(() => window.ea.setLocalRestApiEnabled(true));
+  await page.clock.install({ time: new Date('2026-10-21T12:00:00') });
+  await page.reload();
+  await waitUntilReady();
+  await page.waitForFunction(() => !!window.__e2eTestHelpers?.store);
+  const restToken = await page.evaluate(() => window.ea.getLocalRestApiToken());
+  const api = async (method, route, body) => {
+    const response = await fetch(`http://127.0.0.1:3876${route}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${restToken}`,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    assert.ok(response.ok, `${method} ${route}: ${response.status}`);
+    return (await response.json()).data;
+  };
+  const readState = () =>
+    page.evaluate(() => {
+      let state;
+      window.__e2eTestHelpers.store.subscribe((value) => (state = value)).unsubscribe();
+      return state;
+    });
+  const reloadReady = async () => {
+    await page.clock.resume();
+    await page.reload();
+    await waitUntilReady();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  };
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  const today = await page.evaluate(() => {
+    const date = new Date();
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  });
+  const yesterday = await page.evaluate(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  });
+  const seedBufferedTask = async (name, parentId) => {
+    await api('POST', '/task-control/stop');
+    assert.equal(
+      (await api('GET', '/focus')).timer,
+      null,
+      'must track outside focus mode',
+    );
+    const task = await api('POST', '/tasks', {
+      title: name,
+      ...(parentId ? { parentId } : { dueDay: today }),
+    });
+    await api('PUT', `/tasks/${task.id}/time`, { date: today, duration: 60000 });
+    await api('PUT', `/tasks/${task.id}/time`, { date: yesterday, duration: 120000 });
+    // Align with the already-running global interval before starting the task.
+    await page.clock.runFor(1000);
+    await api('POST', `/tasks/${task.id}/start`);
+    await page.clock.runFor(30000);
+    const state = await readState();
+    assert.equal(state.tasks.entities[task.id].timeSpentOnDay[today], 61000);
+    assert.equal(state.taskTimeBuffer.taskId, task.id);
+    assert.equal(state.taskTimeBuffer.duration, 29000);
+    console.log(`PRECONDITION ${name}: today=61000, buffer=29000, exact=90000`);
+    return task.id;
+  };
+  const assertTime = async (
+    taskId,
+    expectedYesterday = 120000,
+    expectedToday = 90000,
+  ) => {
+    const task = await api('GET', `/tasks/${taskId}`);
+    assert.equal(
+      task.timeSpentOnDay[today],
+      expectedToday,
+      'unchanged today must retain buffered time',
+    );
+    assert.equal(task.timeSpentOnDay[yesterday] || 0, expectedYesterday);
+    assert.equal(task.timeSpent, expectedToday + expectedYesterday);
+  };
+  const failures = [];
+  for (const scenario of [
+    'rest',
+    'dialog-estimate',
+    'dialog-other-day',
+    'undo',
+    'context-tag',
+    'context-project',
+    'context-suspend',
+  ]) {
+    if (process.env.BUFFER_CASE && !scenario.startsWith(process.env.BUFFER_CASE))
+      continue;
+    try {
+      if (scenario.startsWith('context')) {
+        await api('POST', '/task-control/stop');
+        const base = new Date(`${today}T10:00:00`).getTime();
+        await page.clock.setSystemTime(base + 25000);
+        await page.clock.runFor(1000);
+        const task = await api('POST', '/tasks', { title: scenario, dueDay: today });
+        await api('PUT', `/tasks/${task.id}/time`, { date: today, duration: 120000 });
+        await api('POST', `/tasks/${task.id}/start`);
+        await page.clock.runFor(1000);
+        await page.clock.setSystemTime(base + 28000);
+        const kind = scenario === 'context-project' ? 'project' : 'tag';
+        const contextId = `buffer-${scenario}`;
+        await page.evaluate(
+          ({ kind, id, taskId }) => {
+            const store = window.__e2eTestHelpers.store;
+            let s;
+            store.subscribe((v) => (s = v)).unsubscribe();
+            const entity = {
+              ...(kind === 'tag'
+                ? s.tag.entities.TODAY
+                : s.projects.entities.INBOX_PROJECT),
+              id,
+              title: id,
+              created: Date.now(),
+              taskIds: [],
+              ...(kind === 'project' ? { backlogTaskIds: [], noteIds: [] } : {}),
+            };
+            store.dispatch({
+              type: kind === 'tag' ? '[Tag] Add Tag' : '[Project] Add Project',
+              [kind]: entity,
+              meta: {
+                isPersistent: true,
+                entityType: kind.toUpperCase(),
+                entityId: id,
+                opType: 'CRT',
+              },
+            });
+            const meta = {
+              isPersistent: true,
+              entityType: 'TASK',
+              entityId: taskId,
+              opType: 'UPD',
+            };
+            store.dispatch(
+              kind === 'tag'
+                ? {
+                    type: '[Task Shared] updateTask',
+                    task: { id: taskId, changes: { tagIds: [id] } },
+                    meta,
+                  }
+                : {
+                    type: '[Task Shared] moveToOtherProject',
+                    task: { ...s.tasks.entities[taskId], subTasks: [] },
+                    targetProjectId: id,
+                    meta,
+                  },
+            );
+          },
+          { kind, id: contextId, taskId: task.id },
+        );
+        await page.clock.runFor(2500);
+        const before = await readState();
+        assert.ok(before.taskTimeBuffer?.duration > 0, 'must stop with buffered ticks');
+        const lastTick = await page.evaluate(
+          () =>
+            window.ng.getComponent(document.querySelector('app-root'))._taskService
+              ._timeTrackingService._currentTrackingStart,
+        );
+        const expected = { s: base, e: Math.round(lastTick / 60000) * 60000 };
+        await page.clock.setSystemTime(
+          scenario === 'context-suspend' ? base + 86400000 : base + 31900,
+        );
+        await api('POST', '/task-control/stop');
+        const actual = (await readState()).timeTracking[kind][contextId][today];
+        console.log(
+          `CONTEXT ${scenario}: expected=${JSON.stringify(expected)}, actual=${JSON.stringify(actual)}`,
+        );
+        assert.deepEqual(actual, expected);
+        await page.clock.resume();
+        await page.evaluate(() => window.__e2eTestHelpers.flushPendingWrites());
+        await reloadReady();
+        assert.deepEqual(
+          (await readState()).timeTracking[kind][contextId][today],
+          expected,
+        );
+        console.log(`PASS buffered ${scenario}, including reload`);
+        continue;
+      }
+      const parent =
+        scenario === 'undo'
+          ? await api('POST', '/tasks', { title: 'Buffered undo parent', dueDay: today })
+          : null;
+      const taskId = await seedBufferedTask(`Buffered ${scenario}`, parent?.id);
+      if (scenario === 'rest') {
+        await api('PUT', `/tasks/${taskId}/time`, { date: yesterday, duration: 600000 });
+        await assertTime(taskId, 600000);
+      } else if (scenario.startsWith('dialog')) {
+        const row = page
+          .locator('task')
+          .filter({ hasText: `Buffered ${scenario}` })
+          .first();
+        await row.locator('.time-wrapper').click({ force: true });
+        const dialog = page.locator('dialog-time-estimate');
+        await expect(dialog).toBeVisible();
+        // Allow Angular's scheduled render/form registration while real tracking
+        // continues. One further second must survive the edit too.
+        await page.clock.runFor(1000);
+        assert.equal(
+          (await api('GET', '/status')).currentTask.timeSpentOnDay[today],
+          91000,
+        );
+        if (scenario === 'dialog-estimate') {
+          await dialog.locator('input-duration-slider input').nth(1).fill('15m');
+        } else {
+          await dialog.locator('.other-day input').first().fill('10m');
+        }
+        await dialog.locator('button[type="submit"]').click({ force: true });
+        await assertTime(taskId, scenario === 'dialog-estimate' ? 120000 : 600000, 91000);
+        assert.equal(
+          (await api('GET', `/tasks/${taskId}`)).timeEstimate,
+          scenario === 'dialog-estimate' ? 900000 : 0,
+        );
+      } else {
+        await api('DELETE', `/tasks/${parent.id}`);
+        await page.clock.runFor(500);
+        await page.locator('snack-custom button.action').click({ force: true });
+        await assertTime(taskId);
+        await assertTime(parent.id);
+      }
+      await api('POST', '/task-control/stop');
+      await page.clock.resume();
+      await page.evaluate(() => window.__e2eTestHelpers.flushPendingWrites());
+      await reloadReady();
+      await assertTime(
+        taskId,
+        scenario === 'rest' || scenario === 'dialog-other-day' ? 600000 : 120000,
+        scenario.startsWith('dialog') ? 91000 : 90000,
+      );
+      if (parent) await assertTime(parent.id);
+      console.log(`PASS buffered ${scenario}, including reload`);
+    } catch (error) {
+      failures.push(`${scenario}: ${error.stack}`);
+      console.error(`FAIL buffered ${scenario}: ${error.message}`);
+      await page.keyboard.press('Escape');
+      await api('POST', '/task-control/stop');
+      await page.clock.resume();
+      await page.evaluate(() => window.__e2eTestHelpers.flushPendingWrites());
+      await reloadReady();
+    }
+  }
+  assert.deepEqual(failures, [], failures.join('\n'));
 }
 (async () => {
   try {
@@ -135,6 +391,10 @@ async function launch() {
       window.ea.setAssistantAccessScopes(['tasks:read', 'tasks:capture']),
     );
     await waitUntilReady();
+    if (process.env.BUFFER_REGRESSIONS === '1') {
+      await bufferedTimeRegressions(page);
+      return;
+    }
     const created = await call('create_task', {
       title: 'MCP smoke #literal',
       notes: 'smoke note',

@@ -29,49 +29,55 @@ export const timeTrackingReducer = createReducer(
   ),
   on(TimeTrackingActions.updateWholeState, (state, { newState }) => newState),
 
-  on(TimeTrackingActions.addTimeSpent, (state, { task, date, isBackfill }) => {
-    // Back-filled time for a past day was not worked now: stamping Date.now()
-    // as that day's work end (or start) would be wrong.
-    if (isBackfill) {
-      return state;
-    }
-    const isUpdateProject = !!task.projectId;
+  on(
+    TimeTrackingActions.addTimeSpent,
+    (state, { task, date, isBackfill, workStart, workEnd }) => {
+      // Back-filled time for a past day was not worked now: stamping Date.now()
+      // as that day's work end (or start) would be wrong.
+      if (isBackfill) {
+        return state;
+      }
+      const isUpdateProject = !!task.projectId;
 
-    return {
-      ...state,
-      ...(isUpdateProject
-        ? {
-            project: {
-              ...state.project,
-              [task.projectId]: {
-                ...state.project[task.projectId],
-                [date]: {
-                  ...state.project[task.projectId]?.[date],
-                  e: roundTsToMinutes(Date.now()),
-                  s: roundTsToMinutes(
-                    state.project[task.projectId]?.[date]?.s || Date.now(),
-                  ),
+      return {
+        ...state,
+        ...(isUpdateProject
+          ? {
+              project: {
+                ...state.project,
+                [task.projectId]: {
+                  ...state.project[task.projectId],
+                  [date]: {
+                    ...state.project[task.projectId]?.[date],
+                    e: roundTsToMinutes(workEnd ?? Date.now()),
+                    s: roundTsToMinutes(
+                      state.project[task.projectId]?.[date]?.s ||
+                        (workStart ?? Date.now()),
+                    ),
+                  },
                 },
               },
-            },
-          }
-        : {}),
-      tag: {
-        ...state.tag,
-        ...([TODAY_TAG.id, ...(task.tagIds || [])] as string[]).reduce((acc, tagId) => {
-          acc[tagId] = {
-            ...state.tag[tagId],
-            [date]: {
-              ...state.tag[tagId]?.[date],
-              e: roundTsToMinutes(Date.now()),
-              s: roundTsToMinutes(state.tag[tagId]?.[date]?.s || Date.now()),
-            },
-          };
-          return acc;
-        }, {}),
-      },
-    };
-  }),
+            }
+          : {}),
+        tag: {
+          ...state.tag,
+          ...([TODAY_TAG.id, ...(task.tagIds || [])] as string[]).reduce((acc, tagId) => {
+            acc[tagId] = {
+              ...state.tag[tagId],
+              [date]: {
+                ...state.tag[tagId]?.[date],
+                e: roundTsToMinutes(workEnd ?? Date.now()),
+                s: roundTsToMinutes(
+                  state.tag[tagId]?.[date]?.s || (workStart ?? Date.now()),
+                ),
+              },
+            };
+            return acc;
+          }, {}),
+        },
+      };
+    },
+  ),
 
   on(updateWorkContextData, (state, { ctx, date, updates }) => {
     const prop = ctx.type === 'TAG' ? 'tag' : 'project';

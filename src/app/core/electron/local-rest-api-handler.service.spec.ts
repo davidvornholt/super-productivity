@@ -228,7 +228,13 @@ describe('LocalRestApiHandlerService', () => {
 
     featureBridgeMock = jasmine.createSpyObj<LocalRestApiFeatureBridge>(
       'LocalRestApiFeatureBridge',
-      ['issueLink', 'addLiteralSubTask', 'addTimeSpentOnDay', 'currentTask'],
+      [
+        'issueLink',
+        'addLiteralSubTask',
+        'addTimeSpentOnDay',
+        'flushTaskTime',
+        'currentTask',
+      ],
     );
     featureBridgeMock.issueLink.and.returnValue(Promise.resolve(''));
     featureBridgeMock.currentTask.and.returnValue(Promise.resolve(null));

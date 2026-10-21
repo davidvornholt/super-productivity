@@ -44,6 +44,8 @@ export const taskTimeBufferMetaReducer = (
             date: buffer.date,
             duration: buffer.duration,
             isFromTrackingReminder: false,
+            workStart: buffer.firstTickAt,
+            workEnd: buffer.lastTickAt,
           }),
         )
       : state;

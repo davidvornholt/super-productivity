@@ -9,6 +9,7 @@ import { addSubTask } from './store/task.actions';
 import { selectCurrentTaskWithBufferedTime } from './store/task-time-buffer.selectors';
 import { Task } from './task.model';
 import { TaskService } from './task.service';
+import { TaskTimeSyncService } from './task-time-sync.service';
 
 /** Features-side implementation of `LOCAL_REST_API_FEATURE_BRIDGE`. */
 @Injectable()
@@ -16,6 +17,7 @@ export class LocalRestApiFeatureBridgeService implements LocalRestApiFeatureBrid
   private readonly _issueService = inject(IssueService);
   private readonly _taskService = inject(TaskService);
   private readonly _store = inject(Store);
+  private readonly _taskTimeSync = inject(TaskTimeSyncService);
 
   issueLink(
     issueType: IssueProviderKey,
@@ -41,6 +43,10 @@ export class LocalRestApiFeatureBridgeService implements LocalRestApiFeatureBrid
 
   addTimeSpentOnDay(task: Task, durationMs: number, date: string): void {
     this._taskService.addTimeSpentAndSync(task, durationMs, date);
+  }
+
+  flushTaskTime(taskId: string): void {
+    this._taskTimeSync.flushOne(taskId);
   }
 
   currentTask(): Promise<Task | null> {

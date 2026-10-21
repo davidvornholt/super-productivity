@@ -5,6 +5,7 @@ import {
 } from './task-time-buffer.selectors';
 
 const DAY = '2026-01-05';
+const STAMPS = { firstTickAt: 1, lastTickAt: 2 };
 
 describe('task time buffer selectors', () => {
   const task: Task = {
@@ -27,7 +28,12 @@ describe('task time buffer selectors', () => {
     const project = selectCurrentTaskWithBufferedTime.projector;
 
     it('adds the buffered time to the current task', () => {
-      const result = project(task, { taskId: 'task-1', date: DAY, duration: 5000 });
+      const result = project(task, {
+        ...STAMPS,
+        taskId: 'task-1',
+        date: DAY,
+        duration: 5000,
+      });
 
       expect(result).toEqual({
         ...task,
@@ -39,7 +45,7 @@ describe('task time buffer selectors', () => {
     it('adds a day the task has no time on yet', () => {
       const result = project(
         { ...task, timeSpentOnDay: {}, timeSpent: 0 },
-        { taskId: 'task-1', date: DAY, duration: 5000 },
+        { ...STAMPS, taskId: 'task-1', date: DAY, duration: 5000 },
       );
 
       expect(result!.timeSpentOnDay).toEqual({ [DAY]: 5000 });
@@ -48,11 +54,15 @@ describe('task time buffer selectors', () => {
 
     it('returns the task unchanged without a buffer for it', () => {
       expect(project(task, null)).toBe(task);
-      expect(project(task, { taskId: 'other', date: DAY, duration: 5000 })).toBe(task);
+      expect(
+        project(task, { ...STAMPS, taskId: 'other', date: DAY, duration: 5000 }),
+      ).toBe(task);
     });
 
     it('returns null without a current task', () => {
-      expect(project(null, { taskId: 'task-1', date: DAY, duration: 5000 })).toBeNull();
+      expect(
+        project(null, { ...STAMPS, taskId: 'task-1', date: DAY, duration: 5000 }),
+      ).toBeNull();
     });
   });
 });

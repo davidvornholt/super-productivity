@@ -56,6 +56,9 @@ export const TimeTrackingActions = createActionGroup({
       date: string;
       duration: number;
       isFromTrackingReminder: boolean;
+      /** Original tick times when materializing the local desktop buffer. */
+      workStart?: number;
+      workEnd?: number;
       /**
        * Time logged after the fact for a day other than today (Local REST API
        * `POST /tasks/:id/time`). Only the task's time changes: no work start/end

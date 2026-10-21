@@ -220,7 +220,13 @@ describe('StateSnapshotService', () => {
         entities: { task1: task },
       });
       store.setState({
-        taskTimeBuffer: { taskId: 'task1', date: '2024-01-15', duration: 5000 },
+        taskTimeBuffer: {
+          taskId: 'task1',
+          date: '2024-01-15',
+          duration: 5000,
+          firstTickAt: 1,
+          lastTickAt: 2,
+        },
       });
       // Of the 65 s, the 5 s buffered ones are also still waiting to be synced.
       TestBed.inject(TaskTimeSyncService).accumulate('task1', 5000, '2024-01-15');

@@ -19,17 +19,22 @@ export interface TaskTimeBuffer {
   taskId: string;
   date: string;
   duration: number;
+  firstTickAt: number;
+  lastTickAt: number;
 }
 
 export const taskTimeBufferReducer = createReducer<TaskTimeBuffer | null>(
   null,
-  on(TimeTrackingActions.bufferTimeSpent, (state, { taskId, date, duration }) =>
+  on(TimeTrackingActions.bufferTimeSpent, (state, { taskId, date, duration }) => {
+    // Keep the actual tick times: flushing can happen after a minute boundary
+    // or an overnight suspension. These stamps are local, like the buffer.
+    const now = Date.now();
     // The meta-reducer adds a buffer for another task or day to its task
     // before this runs, so a non-matching state is only ever null here.
-    state && state.taskId === taskId && state.date === date
-      ? { ...state, duration: state.duration + duration }
-      : { taskId, date, duration },
-  ),
+    return state && state.taskId === taskId && state.date === date
+      ? { ...state, duration: state.duration + duration, lastTickAt: now }
+      : { taskId, date, duration, firstTickAt: now, lastTickAt: now };
+  }),
 );
 
 /** Adds buffered time to its task exactly as the addTimeSpent reducer would. */
