@@ -1,4 +1,9 @@
-import { ensureAudioContextRunning, getAudioBuffer } from './audio-context';
+import {
+  ensureAudioContextRunning,
+  getAudioBuffer,
+  holdAudioContext,
+  releaseAudioContext,
+} from './audio-context';
 import { Log } from '../core/log';
 
 const BASE = './assets/snd';
@@ -21,6 +26,9 @@ let capTimeoutId: ReturnType<typeof setTimeout> | null = null;
 // two starts overlap (the single caller never overlaps them, but the primitive
 // is self-contained, so it does not rely on that).
 let startToken = 0;
+// Hold owner: keeps the idle suspend away from the shared context while the alarm
+// is starting or looping.
+const ALARM_HOLD = {};
 
 const _teardownNodes = (): void => {
   if (capTimeoutId !== null) {
@@ -40,6 +48,7 @@ const _teardownNodes = (): void => {
     activeGain.disconnect();
     activeGain = null;
   }
+  releaseAudioContext(ALARM_HOLD);
 };
 
 /**
@@ -67,6 +76,7 @@ export const startBreakEndAlarm = async (
   // orphaned source running.
   const myToken = ++startToken;
   _teardownNodes();
+  holdAudioContext(ALARM_HOLD);
 
   try {
     const ctx = await ensureAudioContextRunning();

@@ -1,9 +1,19 @@
-import { ensureAudioContextRunning, setAudioContextKeepAwake } from './audio-context';
+import {
+  ensureAudioContextRunning,
+  holdAudioContext,
+  releaseAudioContext,
+  setAudioContextKeepAwake,
+} from './audio-context';
+
+// Hold owner: keeps the idle suspend away from the shared context while the loop plays.
+const WHITE_NOISE_HOLD = {};
 
 let activeSource: AudioBufferSourceNode | null = null;
 let activeGain: GainNode | null = null;
 let cachedBuffer: AudioBuffer | null = null;
-let startCancelled = false;
+// Bumped by every start and stop: a start whose await outlives a newer start or a
+// stop must not create its source, or it would loop with nothing left to stop it.
+let startToken = 0;
 let activeVolume = 0;
 
 const getOrCreateWhiteNoiseBuffer = (ctx: AudioContext): AudioBuffer => {
@@ -23,10 +33,19 @@ const getOrCreateWhiteNoiseBuffer = (ctx: AudioContext): AudioBuffer => {
 };
 
 export const startWhiteNoise = async (volume: number): Promise<void> => {
-  startCancelled = false;
+  const myToken = ++startToken;
   activeVolume = volume;
-  const ctx = await ensureAudioContextRunning();
-  if (startCancelled) {
+  holdAudioContext(WHITE_NOISE_HOLD);
+  let ctx: AudioContext;
+  try {
+    ctx = await ensureAudioContextRunning();
+  } catch (e) {
+    if (myToken === startToken) {
+      releaseAudioContext(WHITE_NOISE_HOLD);
+    }
+    throw e;
+  }
+  if (myToken !== startToken) {
     return;
   }
   const buffer = getOrCreateWhiteNoiseBuffer(ctx);
@@ -56,8 +75,9 @@ export const setWhiteNoiseVolume = (volume: number): void => {
 };
 
 export const stopWhiteNoise = (): void => {
-  startCancelled = true;
+  startToken++;
   setAudioContextKeepAwake(false);
+  releaseAudioContext(WHITE_NOISE_HOLD);
   if (activeSource) {
     try {
       activeSource.stop();
@@ -74,6 +94,6 @@ export const stopWhiteNoise = (): void => {
   // NOTE: intentionally does NOT suspend the AudioContext here. stopWhiteNoise()
   // runs (via the whiteNoiseSound$ selector effect) right as a session completes,
   // racing the session-done chime (playSound) on the shared context — suspending
-  // would cut the chime off. The context is released instead by the appStateChange
-  // background handler in main.ts (#8243).
+  // would cut the chime off. Releasing the hold instead lets the idle suspend in
+  // audio-context.ts run once no other sound (e.g. the chime) holds the context.
 };
