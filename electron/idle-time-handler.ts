@@ -368,9 +368,11 @@ export class IdleTimeHandler {
       throw error;
     }
 
-    const match = stdout.match(/uint64\s+(\d+)|(?:\(uint64\s+)?(\d+)(?:,\))?/);
+    // gdbus prints `(uint64 8,)`; dbus-send prints a `time=<epoch>` header line
+    // before `uint64 8`, so only a number tagged uint64 is the idle time.
+    const match = stdout.match(/uint64\s+(\d+)/);
     if (match) {
-      const idleMs = parseInt(match[1] || match[2], 10);
+      const idleMs = parseInt(match[1], 10);
       if (idleMs >= 0 && idleMs < Number.MAX_SAFE_INTEGER) {
         return idleMs;
       }
