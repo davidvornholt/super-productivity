@@ -513,7 +513,7 @@ export class LocalRestApiHandlerService {
     requestId: string,
   ): Promise<LocalRestApiResponsePayload> {
     const [currentTask, allTasks] = await Promise.all([
-      firstValueFrom(this._taskService.currentTask$),
+      this._featureBridge.currentTask(),
       firstValueFrom(this._taskService.allTasks$),
     ]);
 
@@ -558,7 +558,7 @@ export class LocalRestApiHandlerService {
   private async _handleGetCurrentTask(
     requestId: string,
   ): Promise<LocalRestApiResponsePayload> {
-    const currentTask = await firstValueFrom(this._taskService.currentTask$);
+    const currentTask = await this._featureBridge.currentTask();
     return createSuccessResponse(requestId, 200, currentTask);
   }
 

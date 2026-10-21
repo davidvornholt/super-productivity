@@ -203,6 +203,38 @@ describe('StateSnapshotService', () => {
       expect((opLogSnapshot.task as TaskState).entities['task1']!.timeSpent).toBe(0);
     });
 
+    // Desktop holds tick time back from the task until its minutes change.
+    it('should add buffered tick time to the task in every snapshot', () => {
+      const task = {
+        ...DEFAULT_TASK,
+        id: 'task1',
+        title: 'Test Task',
+        created: 1,
+        projectId: 'project-1',
+        timeSpentOnDay: { ['2024-01-15']: 60000 },
+        timeSpent: 60000,
+      } as Task;
+      store.overrideSelector(selectTaskFeatureState, {
+        ...initialTaskState,
+        ids: ['task1'],
+        entities: { task1: task },
+      });
+      store.setState({
+        taskTimeBuffer: { taskId: 'task1', date: '2024-01-15', duration: 5000 },
+      });
+      // Of the 65 s, the 5 s buffered ones are also still waiting to be synced.
+      TestBed.inject(TaskTimeSyncService).accumulate('task1', 5000, '2024-01-15');
+
+      const liveTask = (service.getStateSnapshot().task as TaskState).entities['task1']!;
+      const opLogTask = (service.getStateSnapshotForOperationLog().task as TaskState)
+        .entities['task1']!;
+
+      expect(liveTask.timeSpent).toBe(65000);
+      expect(liveTask.timeSpentOnDay).toEqual({ ['2024-01-15']: 65000 });
+      expect(opLogTask.timeSpent).toBe(60000);
+      expect(opLogTask.timeSpentOnDay).toEqual({ ['2024-01-15']: 60000 });
+    });
+
     it('should exclude a task-time delta whose operation write is still pending', () => {
       const task = {
         ...DEFAULT_TASK,

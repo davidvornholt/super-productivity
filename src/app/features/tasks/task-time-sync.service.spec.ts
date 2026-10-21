@@ -1,7 +1,23 @@
 import { TestBed } from '@angular/core/testing';
+import { Action, provideStore, Store } from '@ngrx/store';
 import { MockStore, provideMockStore } from '@ngrx/store/testing';
+import { IS_ELECTRON_TOKEN } from '../../app.constants';
 import { AppStateSnapshot } from '../../op-log/core/types/backup.types';
-import { initialTaskState, taskReducer } from './store/task.reducer';
+import { taskTimeBufferMetaReducer } from '../../root-store/meta/task-time-buffer.meta-reducer';
+import {
+  syncTimeSpent,
+  TimeTrackingActions,
+} from '../time-tracking/store/time-tracking.actions';
+import {
+  initialTimeTrackingState,
+  TIME_TRACKING_FEATURE_KEY,
+  timeTrackingReducer,
+} from '../time-tracking/store/time-tracking.reducer';
+import { initialTaskState, TASK_FEATURE_NAME, taskReducer } from './store/task.reducer';
+import {
+  TASK_TIME_BUFFER_FEATURE_KEY,
+  taskTimeBufferReducer,
+} from './store/task-time-buffer.reducer';
 import { DEFAULT_TASK, Task, TaskState } from './task.model';
 import { TaskTimeSyncService } from './task-time-sync.service';
 
@@ -89,5 +105,142 @@ describe('TaskTimeSyncService', () => {
     const snapshot = { task: initialTaskState } as AppStateSnapshot;
 
     expect(service.projectSnapshot(snapshot)).toBe(snapshot);
+  });
+});
+
+describe('TaskTimeSyncService.addTick', () => {
+  const DAY = '2026-01-05';
+  let service: TaskTimeSyncService;
+  let store: Store<{ [TASK_FEATURE_NAME]: TaskState }>;
+  let dispatched: Action[];
+
+  const setup = (isElectron: boolean, tasks: Task[]): void => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideStore(
+          {
+            [TASK_FEATURE_NAME]: taskReducer,
+            [TIME_TRACKING_FEATURE_KEY]: timeTrackingReducer,
+            [TASK_TIME_BUFFER_FEATURE_KEY]: taskTimeBufferReducer,
+          },
+          {
+            metaReducers: [taskTimeBufferMetaReducer],
+            initialState: {
+              [TASK_FEATURE_NAME]: {
+                ...initialTaskState,
+                ids: tasks.map((t) => t.id),
+                entities: Object.fromEntries(tasks.map((t) => [t.id, t])),
+              },
+              [TIME_TRACKING_FEATURE_KEY]: initialTimeTrackingState,
+              [TASK_TIME_BUFFER_FEATURE_KEY]: null,
+            },
+          },
+        ),
+        { provide: IS_ELECTRON_TOKEN, useValue: isElectron },
+      ],
+    });
+    service = TestBed.inject(TaskTimeSyncService);
+    store = TestBed.inject(Store);
+    dispatched = [];
+    const dispatch = store.dispatch.bind(store);
+    spyOn(store, 'dispatch').and.callFake(((action: Action) => {
+      dispatched.push(action);
+      dispatch(action);
+    }) as typeof store.dispatch);
+  };
+
+  const storedTask = (id = 'task-1'): Task =>
+    store.selectSignal((s) => s[TASK_FEATURE_NAME].entities[id]!)();
+
+  // The task as TaskService hands it over: read from the store at each tick.
+  const tick = (id = 'task-1', date = DAY): string => {
+    service.addTick(storedTask(id), 1000, date);
+    return dispatched[dispatched.length - 1].type;
+  };
+
+  const ADD = TimeTrackingActions.addTimeSpent.type;
+  const BUFFER = TimeTrackingActions.bufferTimeSpent.type;
+
+  it('adds every tick to the task without Electron', () => {
+    setup(false, [createTask('task-1', { timeSpentOnDay: { [DAY]: 60000 } })]);
+
+    expect([tick(), tick(), tick()]).toEqual([ADD, ADD, ADD]);
+    expect(storedTask().timeSpent).toBe(63000);
+  });
+
+  it('buffers ticks on desktop until the whole minutes change', () => {
+    setup(true, [
+      createTask('task-1', { timeSpentOnDay: { [DAY]: 60000 }, timeSpent: 60000 }),
+    ]);
+
+    // The first tick for a task shows at once (auto-add to Today, work start).
+    expect(tick()).toBe(ADD);
+    expect(storedTask().timeSpent).toBe(61000);
+    for (let i = 0; i < 58; i++) {
+      expect(tick()).toBe(BUFFER);
+    }
+    expect(storedTask().timeSpent).toBe(61000);
+
+    expect(tick()).toBe(ADD);
+    expect(storedTask().timeSpent).toBe(120000);
+    expect(storedTask().timeSpentOnDay).toEqual({ [DAY]: 120000 });
+    expect(tick()).toBe(BUFFER);
+  });
+
+  it("adds the tick that changes the day's minutes", () => {
+    setup(true, [
+      createTask('task-1', {
+        timeSpentOnDay: { [DAY]: 58000, ['2026-01-04']: 32000 },
+        timeSpent: 90000,
+      }),
+    ]);
+
+    expect(tick()).toBe(ADD);
+    // Day 59s -> 60s while the total stays at 1:31 -> 1:32.
+    expect(tick()).toBe(ADD);
+    expect(tick()).toBe(BUFFER);
+  });
+
+  it('adds the tick that exceeds the estimate', () => {
+    setup(true, [
+      createTask('task-1', {
+        timeSpentOnDay: { [DAY]: 60000 },
+        timeSpent: 60000,
+        timeEstimate: 62500,
+      }),
+    ]);
+
+    expect([tick(), tick(), tick(), tick()]).toEqual([ADD, BUFFER, ADD, BUFFER]);
+    expect(storedTask().timeSpent).toBe(63000);
+  });
+
+  it('adds the first tick after switching task or day', () => {
+    setup(true, [
+      createTask('task-1', { timeSpentOnDay: { [DAY]: 60000 }, timeSpent: 60000 }),
+      createTask('task-2', { timeSpentOnDay: { [DAY]: 60000 }, timeSpent: 60000 }),
+    ]);
+
+    expect([tick(), tick()]).toEqual([ADD, BUFFER]);
+    expect(tick('task-2')).toBe(ADD);
+    // Switching added task-1's buffered tick to it.
+    expect(storedTask('task-1').timeSpent).toBe(62000);
+    expect(tick('task-1')).toBe(ADD);
+    expect(tick('task-1', '2026-01-06')).toBe(ADD);
+  });
+
+  it('batches every tick for sync, buffered or not', () => {
+    setup(true, [
+      createTask('task-1', { timeSpentOnDay: { [DAY]: 60000 }, timeSpent: 60000 }),
+    ]);
+    for (let i = 0; i < 10; i++) {
+      tick();
+    }
+
+    service.flush();
+
+    const sync = dispatched.filter((a) => a.type === syncTimeSpent.type);
+    expect(sync.length).toBe(1);
+    expect((sync[0] as ReturnType<typeof syncTimeSpent>).duration).toBe(10000);
+    expect(storedTask().timeSpent).toBe(70000);
   });
 });

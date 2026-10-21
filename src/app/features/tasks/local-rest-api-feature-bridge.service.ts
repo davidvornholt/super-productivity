@@ -1,10 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
+import { firstValueFrom } from 'rxjs';
 import { LocalRestApiFeatureBridge } from '../../core/electron/local-rest-api-feature-bridge';
 import { TaskLog } from '../../core/log';
 import { IssueService } from '../issue/issue.service';
 import { IssueProviderKey } from '../issue/issue.model';
 import { addSubTask } from './store/task.actions';
+import { selectCurrentTaskWithBufferedTime } from './store/task-time-buffer.selectors';
 import { Task } from './task.model';
 import { TaskService } from './task.service';
 
@@ -39,5 +41,9 @@ export class LocalRestApiFeatureBridgeService implements LocalRestApiFeatureBrid
 
   addTimeSpentOnDay(task: Task, durationMs: number, date: string): void {
     this._taskService.addTimeSpentAndSync(task, durationMs, date);
+  }
+
+  currentTask(): Promise<Task | null> {
+    return firstValueFrom(this._store.select(selectCurrentTaskWithBufferedTime));
   }
 }

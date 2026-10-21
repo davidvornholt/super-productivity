@@ -3,6 +3,7 @@ import { MockStore, provideMockStore } from '@ngrx/store/testing';
 import { IssueService } from '../issue/issue.service';
 import { LocalRestApiFeatureBridgeService } from './local-rest-api-feature-bridge.service';
 import { addSubTask } from './store/task.actions';
+import { selectCurrentTaskWithBufferedTime } from './store/task-time-buffer.selectors';
 import { Task } from './task.model';
 import { TaskService } from './task.service';
 
@@ -81,5 +82,12 @@ describe('LocalRestApiFeatureBridgeService', () => {
       '2026-05-10',
     );
     expect(dispatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('should return the current task with its buffered tick time', async () => {
+    const task = { id: 'task-1', timeSpent: 61000 } as Task;
+    TestBed.inject(MockStore).overrideSelector(selectCurrentTaskWithBufferedTime, task);
+
+    await expectAsync(service.currentTask()).toBeResolvedTo(task);
   });
 });

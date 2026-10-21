@@ -16,6 +16,9 @@ import { selectProjectFeatureState } from '../../features/project/store/project.
 import { selectSimpleCounterFeatureState } from '../../features/simple-counter/store/simple-counter.reducer';
 import { selectTagFeatureState } from '../../features/tag/store/tag.reducer';
 import { selectTaskFeatureState } from '../../features/tasks/store/task.selectors';
+import { selectTaskTimeBuffer } from '../../features/tasks/store/task-time-buffer.selectors';
+import { addBufferedTimeToTaskState } from '../../features/tasks/store/task-time-buffer.reducer';
+import { TaskState } from '../../features/tasks/task.model';
 import { selectTaskRepeatCfgFeatureState } from '../../features/task-repeat-cfg/store/task-repeat-cfg.selectors';
 import { selectSectionFeatureState } from '../../features/section/store/section.selectors';
 import { selectTimeTrackingState } from '../../features/time-tracking/store/time-tracking.selectors';
@@ -197,6 +200,15 @@ export class StateSnapshotService {
         .pipe(first())
         .subscribe((v) => (result[key] = v));
     }
+    // Desktop keeps tick time out of the task until its minutes change
+    // (TaskTimeBuffer). Snapshots hold the task time as if every tick had been
+    // stored, which the sync batch and its projection below assume.
+    this._store
+      .select(selectTaskTimeBuffer)
+      .pipe(first())
+      .subscribe((buffer) => {
+        result.task = addBufferedTimeToTaskState(result.task as TaskState, buffer);
+      });
 
     return this._normalizeNgRxData(result);
   }

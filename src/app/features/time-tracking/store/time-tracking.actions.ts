@@ -63,6 +63,16 @@ export const TimeTrackingActions = createActionGroup({
        */
       isBackfill?: boolean;
     }>(),
+    /**
+     * A tracking tick that leaves the task's whole minutes unchanged, buffered
+     * on desktop instead of added to the task (see TaskTimeSyncService.addTick).
+     * Local-only action, never persisted.
+     */
+    'Buffer time spent': props<{
+      taskId: string;
+      date: string;
+      duration: number;
+    }>(),
     'Update whole State': props<{
       newState: TimeTrackingState;
     }>(),

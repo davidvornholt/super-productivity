@@ -228,11 +228,8 @@ export class TaskService {
       )
       .subscribe(([tick, currentTask, isImportInProgress]) => {
         if (currentTask?.id && !isImportInProgress) {
-          // Update local state immediately (existing behavior)
-          this.addTimeSpent(currentTask, tick.duration, tick.date);
-
-          // Accumulate for batch sync
-          this._taskTimeSync.accumulate(currentTask.id, tick.duration, tick.date);
+          // Update local state and accumulate for batch sync
+          this._taskTimeSync.addTick(currentTask, tick.duration, tick.date);
 
           // Track contexts for TIME_TRACKING sync
           this._trackContextsForSync(currentTask, tick.date);

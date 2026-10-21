@@ -15,10 +15,10 @@ import {
 import { EMPTY } from 'rxjs';
 
 import {
-  selectCurrentTask,
   selectTaskById,
   selectTaskFeatureState,
 } from '../features/tasks/store/task.selectors';
+import { selectCurrentTaskWithBufferedTime } from '../features/tasks/store/task-time-buffer.selectors';
 import { selectProjectFeatureState } from '../features/project/store/project.selectors';
 import { selectLocalizationConfig } from '../features/config/store/global-config.reducer';
 import { updateGlobalConfigSection } from '../features/config/store/global-config.actions';
@@ -94,11 +94,12 @@ export class PluginHooksEffects {
   // setCurrentTask/unsetCurrentTask (e.g. loadAllData, project delete,
   // bulk task delete). pairwise gives us { current, previous } for the
   // payload — plugins react to a single, authoritative source of truth
-  // without needing to track previous state themselves.
+  // without needing to track previous state themselves. Buffered tick time is
+  // included so `previous` carries the stopped task's time to the second.
   onCurrentTaskChange$ = createEffect(
     () =>
       this.store.pipe(
-        select(selectCurrentTask),
+        select(selectCurrentTaskWithBufferedTime),
         startWith(null as Task | null),
         pairwise(),
         // Only fire on id transitions (start/stop/switch). Same-id emissions

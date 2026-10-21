@@ -22,6 +22,12 @@ export interface LocalRestApiFeatureBridge {
    * A past day is back-filled: no work start/end and no auto-plan for today.
    */
   addTimeSpentOnDay(task: object, durationMs: number, date: string): void;
+
+  /**
+   * The tracked task with its time to the second. The store holds desktop
+   * tick time back until the task's minutes change.
+   */
+  currentTask(): Promise<{ id: string } | null>;
 }
 
 export const LOCAL_REST_API_FEATURE_BRIDGE =
