@@ -135,6 +135,10 @@ export class DialogTimeEstimateComponent implements AfterViewInit {
     // The dialog copy may predate buffered ticks or edits made while it was open.
     // Only explicitly edited days replace values in the latest task's map.
     this._taskService.getByIdOnce$(this.task.id).subscribe((currentTask) => {
+      if (!currentTask) {
+        this._matDialogRef.close();
+        return;
+      }
       if (changedDays.length) {
         const timeSpentOnDay = { ...currentTask.timeSpentOnDay };
         for (const day of changedDays) {

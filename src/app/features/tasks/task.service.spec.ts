@@ -29,6 +29,7 @@ import { signal } from '@angular/core';
 import { DeletedTaskIssueSidecarService } from '../issue/two-way-sync/deleted-task-issue-sidecar.service';
 import { TaskTimeSyncService } from './task-time-sync.service';
 import { selectTaskEntities } from './store/task.selectors';
+import { initialTaskState } from './store/task.reducer';
 
 describe('TaskService', () => {
   let service: TaskService;
@@ -315,38 +316,55 @@ describe('TaskService', () => {
     it('should dispatch deleteTask', () => {
       const task = createMockTaskWithSubTasks(createMockTask('task-1'));
 
+      store.setState({
+        tasks: { ...initialTaskState, ids: [task.id], entities: { [task.id]: task } },
+      });
       service.remove(task);
 
       expect(store.dispatch).toHaveBeenCalledWith(TaskSharedActions.deleteTask({ task }));
     });
 
-    it('should clear pending time for the task and its subtasks', () => {
-      const clearOneSpy = spyOn(taskTimeSync, 'clearOne');
+    it('should flush pending time for the task and its subtasks', () => {
+      const flushOneSpy = spyOn(taskTimeSync, 'flushOne');
       const subTask = createMockTask('subtask-1', { parentId: 'task-1' });
       const task = createMockTaskWithSubTasks(
         createMockTask('task-1', { subTaskIds: ['subtask-1'] }),
         [subTask],
       );
 
+      store.setState({
+        tasks: {
+          ...initialTaskState,
+          ids: [task.id, subTask.id],
+          entities: { [task.id]: task, [subTask.id]: subTask },
+        },
+      });
       service.remove(task);
 
-      expect(clearOneSpy).toHaveBeenCalledWith('task-1');
-      expect(clearOneSpy).toHaveBeenCalledWith('subtask-1');
+      expect(flushOneSpy).toHaveBeenCalledWith('task-1');
+      expect(flushOneSpy).toHaveBeenCalledWith('subtask-1');
     });
 
     // Regression: deleting a sub-task via keyboard shortcut (Backspace) passes the
     // raw Task entity, which has no `subTasks` array — remove() must not throw. #9280
     it('should still dispatch when removing a sub-task without a subTasks array', () => {
-      const clearOneSpy = spyOn(taskTimeSync, 'clearOne');
+      const flushOneSpy = spyOn(taskTimeSync, 'flushOne');
       const subTask = createMockTask('subtask-1', {
         parentId: 'task-1',
       }) as TaskWithSubTasks;
 
+      store.setState({
+        tasks: {
+          ...initialTaskState,
+          ids: [subTask.id],
+          entities: { [subTask.id]: subTask },
+        },
+      });
       expect(() => service.remove(subTask)).not.toThrow();
       expect(store.dispatch).toHaveBeenCalledWith(
-        TaskSharedActions.deleteTask({ task: subTask }),
+        TaskSharedActions.deleteTask({ task: { ...subTask, subTasks: [] } }),
       );
-      expect(clearOneSpy).toHaveBeenCalledWith('subtask-1');
+      expect(flushOneSpy).toHaveBeenCalledWith('subtask-1');
     });
   });
 

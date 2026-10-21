@@ -473,11 +473,11 @@ export class TaskService {
   }
 
   remove(task: TaskWithSubTasks): void {
-    this._taskTimeSync.clearOne(task.id);
-    // Clear via subTaskIds (always present) not subTasks: the keyboard-delete path
-    // passes a raw Task entity whose subTasks array is undefined (see #9280).
-    task.subTaskIds.forEach((id) => this._taskTimeSync.clearOne(id));
-    this._store.dispatch(TaskSharedActions.deleteTask({ task }));
+    [task.id, ...task.subTaskIds].forEach((id) => this._taskTimeSync.flushOne(id));
+    // Read after flushing so reducers and captured operations share exact times.
+    this.getByIdWithSubTaskData$(task.id).subscribe(
+      (t) => t && this._store.dispatch(TaskSharedActions.deleteTask({ task: t })),
+    );
   }
 
   removeMultipleTasks(taskIds: string[]): void {

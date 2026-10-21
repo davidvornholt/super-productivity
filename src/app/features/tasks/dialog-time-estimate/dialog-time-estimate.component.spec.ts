@@ -86,6 +86,17 @@ describe('DialogTimeEstimateComponent closing (#10823)', () => {
     expect(dialogRef.close).toHaveBeenCalledTimes(1);
   });
 
+  it('closes without updating if the task disappeared while the dialog was open', () => {
+    const cmp = createComponent();
+    cmp.taskCopy.timeEstimate = 120000;
+    taskService.getByIdOnce$.and.returnValue(of<Task>(undefined!));
+
+    cmp.submit();
+
+    expect(taskService.update).not.toHaveBeenCalled();
+    expect(dialogRef.close).toHaveBeenCalledOnceWith();
+  });
+
   it('discards changes on Escape', () => {
     const cmp = createComponent();
     cmp.taskCopy.timeEstimate = 120000;

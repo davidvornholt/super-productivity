@@ -201,6 +201,7 @@ async function bufferedTimeRegressions(page) {
     'dialog-estimate',
     'dialog-other-day',
     'undo',
+    'undo-child',
     'context-tag',
     'context-project',
     'context-suspend',
@@ -296,10 +297,9 @@ async function bufferedTimeRegressions(page) {
         console.log(`PASS buffered ${scenario}, including reload`);
         continue;
       }
-      const parent =
-        scenario === 'undo'
-          ? await api('POST', '/tasks', { title: 'Buffered undo parent', dueDay: today })
-          : null;
+      const parent = scenario.startsWith('undo')
+        ? await api('POST', '/tasks', { title: 'Buffered undo parent', dueDay: today })
+        : null;
       const taskId = await seedBufferedTask(`Buffered ${scenario}`, parent?.id);
       if (scenario === 'rest') {
         await api('PUT', `/tasks/${taskId}/time`, { date: yesterday, duration: 600000 });
@@ -331,7 +331,55 @@ async function bufferedTimeRegressions(page) {
           scenario === 'dialog-estimate' ? 900000 : 0,
         );
       } else {
-        await api('DELETE', `/tasks/${parent.id}`);
+        const deletedId = scenario === 'undo-child' ? taskId : parent.id;
+        await api('DELETE', `/tasks/${deletedId}`);
+        const deletedState = await readState();
+        assert.equal(deletedState.tasks.entities[taskId], undefined);
+        if (scenario === 'undo-child') {
+          console.log(
+            `DELETE child: parent today=${deletedState.tasks.entities[parent.id].timeSpentOnDay[today]}`,
+          );
+          await assertTime(parent.id);
+          assert.deepEqual(deletedState.tasks.entities[parent.id].subTaskIds, []);
+        } else {
+          assert.equal(deletedState.tasks.entities[parent.id], undefined);
+        }
+        await page.clock.resume();
+        await page.evaluate(() => window.__e2eTestHelpers.flushPendingWrites());
+        await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+        const capturedTask = await page.evaluate(async (deletedId) => {
+          const db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open('SUP_OPS');
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          try {
+            const entries = await new Promise((resolve, reject) => {
+              const request = db.transaction('ops').objectStore('ops').getAll();
+              request.onsuccess = () => resolve(request.result);
+              request.onerror = () => reject(request.error);
+            });
+            const op = entries
+              .map((entry) => entry.op)
+              .findLast(
+                (op) =>
+                  (op.o ?? op.opType) === 'DEL' && (op.d ?? op.entityId) === deletedId,
+              );
+            return (op.p ?? op.payload).actionPayload.task;
+          } finally {
+            db.close();
+          }
+        }, deletedId);
+        const capturedChild =
+          scenario === 'undo-child'
+            ? capturedTask
+            : capturedTask.subTasks.find((task) => task.id === taskId);
+        console.log(
+          `CAPTURE ${scenario}: today=${capturedChild.timeSpentOnDay[today]}, yesterday=${capturedChild.timeSpentOnDay[yesterday]}`,
+        );
+        assert.equal(capturedChild.timeSpentOnDay[today], 90000);
+        assert.equal(capturedChild.timeSpentOnDay[yesterday], 120000);
+        assert.equal(capturedChild.timeSpent, 210000);
         await page.clock.runFor(500);
         await page.locator('snack-custom button.action').click({ force: true });
         await assertTime(taskId);
