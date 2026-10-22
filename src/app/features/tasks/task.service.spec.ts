@@ -755,7 +755,7 @@ describe('TaskService', () => {
 
     it('should dispatch moveToArchive and call archive service for parent tasks', async () => {
       const task = createMockTaskWithSubTasks(
-        createMockTask('task-1', { projectId: 'test-project' }),
+        store.selectSignal(selectTaskEntities)()['task-1']!,
       );
 
       await service.moveToArchive(task);
@@ -769,9 +769,10 @@ describe('TaskService', () => {
     });
 
     it('should handle array of tasks', async () => {
+      const entities = store.selectSignal(selectTaskEntities)();
       const tasks = [
-        createMockTaskWithSubTasks(createMockTask('task-1')),
-        createMockTaskWithSubTasks(createMockTask('task-2')),
+        createMockTaskWithSubTasks(entities['task-1']!),
+        createMockTaskWithSubTasks(entities['task-2']!),
       ];
 
       await service.moveToArchive(tasks);
