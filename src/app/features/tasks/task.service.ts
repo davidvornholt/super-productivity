@@ -1001,6 +1001,7 @@ export class TaskService {
       if (taskIds.some((id) => id === this.currentTaskId())) this.pauseCurrent();
       taskIds.forEach((id) => this._taskTimeSync.flushOne(id));
       const entities = this._taskEntities();
+      // Note: Full task payload required for sync - see docs/sync-and-op-log/operation-log-architecture.md
       parentTasksToArchive = parentTasksToArchive.map((t) => {
         const task = entities[t.id];
         return task
