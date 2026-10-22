@@ -604,7 +604,89 @@ describe('TaskService', () => {
     });
   });
 
+  describe('updateTimeSpentOnDayEverywhere', () => {
+    it('should preserve untouched days from fresh active and archived tasks', async () => {
+      const today = '2026-01-05';
+      const yesterday = '2026-01-04';
+      const stale = createMockTask('task-1', {
+        timeSpentOnDay: { [today]: 1000, [yesterday]: 120000 },
+      });
+      const fresh = { ...stale, timeSpentOnDay: { [today]: 4000, [yesterday]: 120000 } };
+      const taskArchive = TestBed.inject(
+        TaskArchiveService,
+      ) as jasmine.SpyObj<TaskArchiveService>;
+      const update = spyOn(service, 'update');
+      const flush = spyOn(taskTimeSync, 'flushOne');
+      for (const archived of [false, true]) {
+        store.setState({
+          tasks: { ...initialTaskState, entities: archived ? {} : { [stale.id]: stale } },
+        });
+        flush.and.callFake(() => {
+          if (!archived) {
+            store.setState({
+              tasks: { ...initialTaskState, entities: { [fresh.id]: fresh } },
+            });
+          }
+        });
+        taskArchive.getById.and.resolveTo(fresh);
+
+        await service.updateTimeSpentOnDayEverywhere(stale.id, yesterday, 600000);
+
+        expect(archived ? taskArchive.updateTask : update).toHaveBeenCalledWith(
+          stale.id,
+          {
+            timeSpentOnDay: { [today]: 4000, [yesterday]: 600000 },
+          },
+        );
+      }
+    });
+  });
+
   describe('moveToArchive', () => {
+    it('should stop tracking and persist fresh family times before removing tasks', async () => {
+      const day = '2026-01-05';
+      const parent = createMockTask('parent', { subTaskIds: ['child'] });
+      const child = createMockTask('child', {
+        parentId: parent.id,
+        timeSpent: 1000,
+        timeSpentOnDay: { [day]: 1000 },
+      });
+      const freshChild = { ...child, timeSpent: 4000, timeSpentOnDay: { [day]: 4000 } };
+      const freshParent = { ...parent, timeSpent: 4000, timeSpentOnDay: { [day]: 4000 } };
+      store.setState({
+        tasks: {
+          ...initialTaskState,
+          entities: { parent, child },
+          currentTaskId: child.id,
+        },
+      });
+      const pause = spyOn(service, 'pauseCurrent');
+      spyOn(taskTimeSync, 'flushOne').and.callFake(() => {
+        store.overrideSelector(selectTaskEntities, {
+          parent: freshParent,
+          child: freshChild,
+        });
+        store.refreshState();
+      });
+      const freshFamily = { ...freshParent, subTasks: [freshChild] };
+      archiveService.moveTasksToArchiveAndFlushArchiveIfDue.and.callFake(
+        async (tasks) => {
+          expect(pause).toHaveBeenCalled();
+          expect(tasks).toEqual([freshFamily]);
+          expect(store.dispatch).not.toHaveBeenCalledWith(
+            jasmine.objectContaining({ type: TaskSharedActions.moveToArchive.type }),
+          );
+        },
+      );
+
+      await service.moveToArchive({ ...parent, subTasks: [child] });
+
+      expect(taskTimeSync.flushOne).toHaveBeenCalledWith(child.id);
+      expect(store.dispatch).toHaveBeenCalledWith(
+        TaskSharedActions.moveToArchive({ tasks: [freshFamily] }),
+      );
+    });
+
     it('should persist parent tasks before dispatching the archive action', async () => {
       const task = createMockTaskWithSubTasks(createMockTask('task-1'));
       const callOrder: string[] = [];

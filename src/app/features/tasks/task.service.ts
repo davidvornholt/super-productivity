@@ -946,24 +946,10 @@ export class TaskService {
       return;
     }
 
-    if (!Array.isArray(tasks)) {
-      TaskLog.warn('[TaskService] moveToArchive converting single task to array', {
-        id: tasks.id,
-      });
-      tasks = [tasks];
-    }
-
+    tasks = Array.isArray(tasks) ? tasks : [tasks];
     if (!tasks.length) {
-      TaskLog.log('[TaskService] No tasks to archive');
       return;
     }
-
-    TaskLog.log('[TaskService] moveToArchive called with:', {
-      count: tasks.length,
-      taskIds: tasks.map((t) => t?.id),
-      tasksType: typeof tasks,
-      isArray: Array.isArray(tasks),
-    });
 
     // NOTE: malformed tasks (missing/invalid ids) are dropped inside archive.service
     // via sanitizeTasksForArchiving, which also covers writeTasksToArchiveForRemoteSync.
@@ -972,11 +958,6 @@ export class TaskService {
     const subTasks = tasks.filter((t) => t?.parentId);
     const parentTasks = tasks.filter((t) => t && !t.parentId);
 
-    TaskLog.log('[TaskService] Filtered tasks:', {
-      parentTasks: parentTasks.map((t) => t.id),
-      subTasks: subTasks.map((t) => t.id),
-    });
-
     if (subTasks.length) {
       if (this._workContextService.activeWorkContextType !== WorkContextType.TAG) {
         // this should be handled by moving parentTasks to archive
@@ -984,8 +965,6 @@ export class TaskService {
       } else {
         // when on a tag such as today, we simply remove the tag instead of attempting to move to archive
         const tagToRemove = this._workContextService.activeWorkContextId;
-        // eslint-disable-next-line local-rules/no-user-content-in-logs -- grandfathered log baseline (2026-09), not yet triaged
-        TaskLog.log('[TaskService] Removing tag from subtasks:', tagToRemove);
         subTasks.forEach((st) => {
           this.updateTags(
             st,
@@ -995,14 +974,13 @@ export class TaskService {
       }
     }
 
-    const parentTasksToArchive: TaskWithSubTasks[] = [];
+    let parentTasksToArchive: TaskWithSubTasks[] = [];
     const reservedTaskIds = new Set<string>();
     const existingArchivePromises = new Set<Promise<void>>();
     for (const task of parentTasks) {
       if (task.id) {
         const existingArchivePromise = this._archiveTaskPromisesById.get(task.id);
         if (existingArchivePromise) {
-          TaskLog.log('[TaskService] Archive already in progress', { id: task.id });
           existingArchivePromises.add(existingArchivePromise);
           continue;
         }
@@ -1015,22 +993,36 @@ export class TaskService {
     }
 
     if (parentTasksToArchive.length) {
-      // Only move parent tasks to archive, never subtasks
-      // Note: Full task payload required for sync - see docs/sync-and-op-log/operation-log-architecture.md
+      const taskIds = parentTasksToArchive.flatMap((t) => [
+        t.id,
+        ...(this._taskEntities()[t.id]?.subTaskIds ?? t.subTaskIds ?? []),
+      ]);
+      // Stop this family's ticks before asynchronous archive I/O can race the copy.
+      if (taskIds.some((id) => id === this.currentTaskId())) this.pauseCurrent();
+      taskIds.forEach((id) => this._taskTimeSync.flushOne(id));
+      const entities = this._taskEntities();
+      parentTasksToArchive = parentTasksToArchive.map((t) => {
+        const task = entities[t.id];
+        return task
+          ? {
+              ...task,
+              subTasks: task.subTaskIds
+                .map((id) => entities[id])
+                .filter((st): st is Task => !!st),
+            }
+          : t;
+      });
       // Persist first: dispatch removes the tasks from NgRx and makes the captured
       // operation eligible for a full-state snapshot. If archive persistence were
       // still in flight, that snapshot could acknowledge the operation while
       // omitting its archived task data.
       const archivePromise = (async (): Promise<void> => {
-        TaskLog.log('[TaskService] Calling archive service to persist tasks');
         await this._archiveService.moveTasksToArchiveAndFlushArchiveIfDue(
           parentTasksToArchive,
         );
-        TaskLog.log('[TaskService] Dispatching moveToArchive action for parent tasks');
         this._store.dispatch(
           TaskSharedActions.moveToArchive({ tasks: parentTasksToArchive }),
         );
-        TaskLog.log('[TaskService] Archive operation completed successfully');
       })();
       for (const taskId of reservedTaskIds) {
         this._archiveTaskPromisesById.set(taskId, archivePromise);
@@ -1049,8 +1041,6 @@ export class TaskService {
       // A duplicate caller observes the same success/failure and does not return
       // before the durable archive write plus NgRx removal have completed.
       await Promise.all(existingArchivePromises);
-    } else {
-      TaskLog.log('[TaskService] No parent tasks to archive');
     }
   }
 
@@ -1299,8 +1289,17 @@ export class TaskService {
     );
   }
 
-  // GLOBAL TASK MODEL STUFF
-  // -----------------------
+  async updateTimeSpentOnDayEverywhere(
+    id: string,
+    date: string,
+    duration: number,
+  ): Promise<void> {
+    this._taskTimeSync.flushOne(id);
+    const task = this._taskEntities()[id] ?? (await this._taskArchiveService.getById(id));
+    await this.updateEverywhere(id, {
+      timeSpentOnDay: { ...task.timeSpentOnDay, [date]: duration },
+    });
+  }
 
   // BEWARE: does only work for task model updates, but not for related models
   async updateEverywhere(id: string, changedFields: Partial<Task>): Promise<void> {

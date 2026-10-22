@@ -104,12 +104,7 @@ export class WorklogWeekComponent {
     dateStr: string,
     newVal: number | string,
   ): Promise<void> {
-    await this._taskService.updateEverywhere(task.id, {
-      timeSpentOnDay: {
-        ...task.timeSpentOnDay,
-        [dateStr]: +newVal,
-      },
-    });
+    await this._taskService.updateTimeSpentOnDayEverywhere(task.id, dateStr, +newVal);
     this.worklogService.refreshWorklog();
   }
 
