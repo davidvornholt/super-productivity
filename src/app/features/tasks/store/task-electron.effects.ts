@@ -1,8 +1,9 @@
 import { inject, Injectable } from '@angular/core';
 import { createEffect, ofType } from '@ngrx/effects';
 import { setCurrentTask, unsetCurrentTask } from './task.actions';
-import { select, Store } from '@ngrx/store';
+import { createSelector, select, Store } from '@ngrx/store';
 import {
+  distinctUntilChanged,
   filter,
   map,
   startWith,
@@ -38,6 +39,28 @@ import { IPC } from '../../../../../electron/shared-with-frontend/ipc-events.con
 import { TaskService } from '../task.service';
 import { TaskSharedActions } from '../../../root-store/meta/task-shared.actions';
 import { LOCAL_ACTIONS } from '../../../util/local-actions.token';
+import { Task } from '../task.model';
+
+type TrayTask = Pick<Task, 'id' | 'title' | 'timeEstimate' | 'timeSpent'>;
+
+/** Undone Today tasks in Today's order, as the tray menu receives them. */
+const selectTodayTrayTasks = createSelector(
+  selectTodayTaskIds,
+  selectTaskEntities,
+  (ids, entities): TrayTask[] =>
+    ids
+      .map((id) => entities[id])
+      .filter((t): t is Task => !!t && !t.isDone)
+      .map(({ id, title, timeEstimate, timeSpent }) => ({
+        id,
+        title,
+        timeEstimate,
+        timeSpent,
+      })),
+);
+
+const isSameTrayList = (a: TrayTask[], b: TrayTask[]): boolean =>
+  a.length === b.length && a.every((t, i) => t.id === b[i].id && t.title === b[i].title);
 
 // TODO send message to electron when current task changes here
 
@@ -92,20 +115,10 @@ export class TaskElectronEffects {
   syncTodayTasksToElectron$ = createEffect(
     () =>
       this._store$.pipe(
-        select(selectTodayTaskIds),
-        withLatestFrom(this._store$.pipe(select(selectTaskEntities))),
-        tap(([todayTaskIds, taskEntities]) => {
-          const tasks = todayTaskIds
-            .map((id) => taskEntities[id])
-            .filter((t) => !!t && !t.isDone)
-            .map((t) => ({
-              id: t!.id,
-              title: t!.title,
-              timeEstimate: t!.timeEstimate,
-              timeSpent: t!.timeSpent,
-            }));
-          window.ea.updateTodayTasks(tasks);
-        }),
+        select(selectTodayTrayTasks),
+        // The tray lists titles only, so time changes need not resend the list.
+        distinctUntilChanged(isSameTrayList),
+        tap((tasks) => window.ea.updateTodayTasks(tasks)),
       ),
     { dispatch: false },
   );
