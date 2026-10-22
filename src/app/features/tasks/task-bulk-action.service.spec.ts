@@ -184,6 +184,16 @@ describe('TaskBulkActionService', () => {
     service = TestBed.inject(TaskBulkActionService);
   });
 
+  it('keeps an empty selection independent of task entity updates', () => {
+    const empty = service.selectedTasks();
+    entities.set({ a: t('a') });
+    expect(service.selectedTasks()).toBe(empty);
+    selectedIds.set(new Set(['a']));
+    expect(service.selectedTasks().map((task) => task.id)).toEqual(['a']);
+    entities.set({ a: t('a', { isDone: true }) });
+    expect(service.selectedTasks()[0].isDone).toBe(true);
+  });
+
   describe('markDone', () => {
     it('marks every undone task individually, subtasks first and the tracked task last', async () => {
       currentTaskId.set('tracked');
