@@ -87,6 +87,9 @@ const SHORT_SYNTAX_TAGS_REG_EX = new RegExp(`\\${CH_TAG}[^${ALL_SPECIAL}|\\s]+`,
 // Match string starting with the literal @ and followed by 1 or more of the characters
 // not in the ALL_SPECIAL
 const SHORT_SYNTAX_DUE_REG_EX = new RegExp(`\\${CH_DUE}[^${ALL_SPECIAL}]+`, 'gi');
+// The domain after an email's at-sign ("@example.com" in "max@example.com")
+const EMAIL_DOMAIN_START_REG_EX =
+  /^@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}(?![\p{L}\p{N}-])/u;
 
 // Weekday unit → Date.getDay() index; covers abbreviations and singular form
 // (plural "fridays" is normalized by stripping the trailing "s" before lookup)
@@ -830,11 +833,17 @@ const parseShortSyntaxDate = async (
   // A deadline trigger only counts at the start of the title or after a space
   // (so "Done!" is not a deadline). Skip a match that fails this check rather
   // than giving up, so "wow! !tomorrow" still finds "!tomorrow" (#10217).
+  // Skip an email's at-sign the same way: a date word or digits in its domain
+  // or the prose after it must not erase the address, and an "@date" after it
+  // still counts. Attached syntax such as "lunch@12" stays a trigger.
   const rr =
     [...text.matchAll(regEx)].find((m) => {
       const index = m.index ?? 0;
       const charBeforeTrigger = index > 0 ? text.charAt(index - 1) : '';
-      return !isDeadline || !charBeforeTrigger || charBeforeTrigger === ' ';
+      if (!charBeforeTrigger || charBeforeTrigger === ' ') {
+        return true;
+      }
+      return !isDeadline && !EMAIL_DOMAIN_START_REG_EX.test(m[0]);
     }) ?? null;
 
   if (rr && rr[0]) {
@@ -881,15 +890,6 @@ const parseShortSyntaxDate = async (
 
     if (parsedDateArr.length) {
       const parsedDateResult = parsedDateArr[0];
-      // Chrono can find a date word after an email domain. Reject the whole
-      // token here: filtering out that result would let digits in the domain
-      // fall through to the numeric-hour fallback and still erase the address.
-      // Leave other prefixes to chrono (apostrophes, ordinals, CJK, "v2", ...).
-      if (
-        /^@\S+\.\p{L}{2,}[,>.]?(?:\s|$)/u.test(rr[0].slice(0, parsedDateResult.index))
-      ) {
-        return null;
-      }
       const start = parsedDateResult.start;
       const due = start.date().getTime();
       let hasPlannedTime = true;

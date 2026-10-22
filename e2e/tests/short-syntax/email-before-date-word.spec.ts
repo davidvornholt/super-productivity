@@ -58,6 +58,7 @@ const setUiLanguage = async (page: Page, lng: string): Promise<void> => {
 const CASES: { name: string; lng?: string; text: string }[] = [
   { name: 'the default English UI', text: 'Mail max@example.com tomorrow reply' },
   { name: 'a German UI', lng: 'de', text: 'Mail an max@example.com morgen beantworten' },
+  { name: 'a date-word domain', text: 'Mail anna@monday.com reply' },
 ];
 
 test.describe('Email before a date word', () => {

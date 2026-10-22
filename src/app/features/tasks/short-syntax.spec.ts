@@ -4234,6 +4234,53 @@ describe('shortSyntax localized dates', () => {
       }
     });
 
+    it('should keep an email whose domain looks like a date or an hour', async () => {
+      for (const [locale, title] of [
+        [DEFAULT_DATE_INPUT_LOCALE, 'Mail anna@monday.com about it'],
+        [DEFAULT_DATE_INPUT_LOCALE, 'Write to bob@tomorrow.io'],
+        [DEFAULT_DATE_INPUT_LOCALE, 'Mail info@1und1.de'],
+        [DEFAULT_DATE_INPUT_LOCALE, 'Mail max@firma2.de'],
+        [{ language: 'de', isDayFirst: true }, 'Mail an max@morgen.de beantworten'],
+        [{ language: 'de', isDayFirst: true }, 'Mail an redaktion@heute.de'],
+      ] as const) {
+        const r = await parseIn(locale, title, { ...CONFIG, isEnableDeadline: true });
+        expect(r?.taskChanges.title ?? title)
+          .withContext(title)
+          .toBe(title);
+        expect(r?.taskChanges.dueWithTime).withContext(title).toBeUndefined();
+        expect(r?.taskChanges.dueDay).withContext(title).toBeUndefined();
+      }
+    });
+
+    it('should schedule an @date that follows an email address', async () => {
+      for (const [locale, title, expectedTitle, day] of [
+        [
+          DEFAULT_DATE_INPUT_LOCALE,
+          'Mail max@example.com @tomorrow',
+          'Mail max@example.com',
+          '2026-10-21',
+        ],
+        [
+          DEFAULT_DATE_INPUT_LOCALE,
+          'Mail anna@monday.com @friday',
+          'Mail anna@monday.com',
+          '2026-10-23',
+        ],
+        [
+          { language: 'de', isDayFirst: true },
+          'Mail an max@firma2.de @morgen',
+          'Mail an max@firma2.de',
+          '2026-10-21',
+        ],
+      ] as const) {
+        const r = await parseIn(locale, title);
+        expect(r?.taskChanges.title).withContext(title).toBe(expectedTitle);
+        expect(formatDateToISO(dueOf(r)))
+          .withContext(title)
+          .toBe(day);
+      }
+    });
+
     it('should preserve date matches after prefixes that chrono leaves out', async () => {
       const cases: [string, string, string, number, boolean][] = [
         ['fr', '!d’ici vendredi', '2026-10-23', 12, false],
