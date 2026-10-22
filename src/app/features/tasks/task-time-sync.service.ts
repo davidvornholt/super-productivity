@@ -13,6 +13,7 @@ import {
 } from '../time-tracking/store/time-tracking.actions';
 import { Task, TaskState } from './task.model';
 import { selectTaskTimeBuffer } from './store/task-time-buffer.selectors';
+import { selectTaskEntities } from './store/task.selectors';
 import { TaskTimeBuffer } from './store/task-time-buffer.reducer';
 import { projectPendingTimeFromTaskState } from './util/project-pending-time-from-task-state';
 
@@ -31,6 +32,7 @@ export class TaskTimeSyncService {
   private readonly _isBufferingTicks = inject(IS_ELECTRON_TOKEN);
   // Created when a desktop tick first needs it; no other platform reads it.
   private _taskTimeBuffer?: Signal<TaskTimeBuffer | null>;
+  private _taskEntities?: Signal<TaskState['entities']>;
   private _lastTickKey: string | null = null;
   private readonly _accumulator = new BatchedTimeSyncAccumulator(
     TaskTimeSyncService.SYNC_INTERVAL_MS,
@@ -82,13 +84,19 @@ export class TaskTimeSyncService {
     const buffered =
       buffer && buffer.taskId === task.id && buffer.date === date ? buffer.duration : 0;
     const before = task.timeSpent + buffered;
-    const dayBefore =
-      ((task.timeSpentOnDay && task.timeSpentOnDay[date]) || 0) + buffered;
     const isMinuteChange = (from: number): boolean =>
       Math.floor(from / MINUTE_MS) !== Math.floor((from + duration) / MINUTE_MS);
+    const changesDisplayedMinutes = (t: Task): boolean =>
+      isMinuteChange(t.timeSpent + buffered) ||
+      isMinuteChange((t.timeSpentOnDay?.[date] || 0) + buffered);
+    const parent = task.parentId
+      ? (this._taskEntities ??= this._store.selectSignal(selectTaskEntities))()[
+          task.parentId
+        ]
+      : undefined;
     return (
-      isMinuteChange(before) ||
-      isMinuteChange(dayBefore) ||
+      changesDisplayedMinutes(task) ||
+      (!!parent && changesDisplayedMinutes(parent)) ||
       (task.timeEstimate > 0 &&
         before <= task.timeEstimate &&
         before + duration > task.timeEstimate)

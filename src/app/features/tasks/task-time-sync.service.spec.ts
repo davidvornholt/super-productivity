@@ -228,6 +228,31 @@ describe('TaskTimeSyncService.addTick', () => {
     expect(tick('task-1', '2026-01-06')).toBe(ADD);
   });
 
+  it('updates a parent when its displayed minute changes before the child minute', () => {
+    setup(true, [
+      createTask('task-1', {
+        parentId: 'parent',
+        timeSpentOnDay: { [DAY]: 60000 },
+        timeSpent: 60000,
+      }),
+      createTask('sibling', {
+        parentId: 'parent',
+        timeSpentOnDay: { [DAY]: 58000 },
+        timeSpent: 58000,
+      }),
+      createTask('parent', {
+        subTaskIds: ['task-1', 'sibling'],
+        timeSpentOnDay: { [DAY]: 118000 },
+        timeSpent: 118000,
+      }),
+    ]);
+    tick();
+    expect(storedTask('parent').timeSpent).toBe(119000);
+    tick();
+    expect(storedTask('parent').timeSpent).toBe(120000);
+    expect(storedTask('parent').timeSpentOnDay[DAY]).toBe(120000);
+  });
+
   it('batches every tick for sync, buffered or not', () => {
     setup(true, [
       createTask('task-1', { timeSpentOnDay: { [DAY]: 60000 }, timeSpent: 60000 }),
