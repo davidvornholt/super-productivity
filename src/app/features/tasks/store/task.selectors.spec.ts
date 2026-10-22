@@ -1557,3 +1557,39 @@ describe('Task Selectors', () => {
     });
   });
 });
+
+describe('selectTasksWithDueTimeForDay', () => {
+  const timedTask = (id: string, date: string): Task => ({
+    ...DEFAULT_TASK,
+    id,
+    projectId: 'INBOX',
+    dueWithTime: new Date(date).getTime(),
+  });
+
+  it('excludes the previous logical night and includes the following early morning', () => {
+    const tasks = [
+      timedTask('previous-night', '2026-06-16T02:00:00'),
+      timedTask('boundary', '2026-06-16T04:00:00'),
+      timedTask('late-night', '2026-06-17T02:00:00'),
+      timedTask('tomorrow', '2026-06-17T04:00:00'),
+    ];
+    expect(
+      fromSelectors.selectTasksWithDueTimeForDay
+        .projector(tasks, 4 * 60 * 60 * 1000, { day: '2026-06-16' })
+        .map((task: Task) => task.id),
+    ).toEqual(['boundary', 'late-night']);
+  });
+
+  it('keeps calendar-day membership at the default zero offset', () => {
+    const tasks = [
+      timedTask('early', '2026-06-16T02:00:00'),
+      timedTask('late', '2026-06-16T23:59:59.999'),
+      timedTask('tomorrow', '2026-06-17T00:00:00'),
+    ];
+    expect(
+      fromSelectors.selectTasksWithDueTimeForDay
+        .projector(tasks, 0, { day: '2026-06-16' })
+        .map((task: Task) => task.id),
+    ).toEqual(['early', 'late']);
+  });
+});

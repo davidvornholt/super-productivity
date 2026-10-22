@@ -918,6 +918,19 @@ export const selectTasksDueAndOverdueForDay = createSelector(
   },
 );
 
+// Automatic day planning must use the same logical-day membership as Today.
+// A calendar-midnight range also picks up overdue early-morning tasks from
+// the previous logical day and can erase their schedule when moving them.
+export const selectTasksWithDueTimeForDay = createSelector(
+  selectAllTasksInActiveProjects,
+  selectStartOfNextDayDiffMs,
+  (tasks: Task[], offsetMs: number, props: { day: string }): TaskWithDueTime[] =>
+    tasks.filter(
+      (task): task is TaskWithDueTime =>
+        !!task.dueWithTime && isTodayWithOffset(task.dueWithTime, props.day, offsetMs),
+    ),
+);
+
 export const selectTasksWithDueTimeForRange = createSelector(
   selectAllTasksInActiveProjects,
   (tasks: Task[], props: { start: number; end: number }): TaskWithDueTime[] => {

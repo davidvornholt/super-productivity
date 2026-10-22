@@ -8,9 +8,8 @@ import { Store } from '@ngrx/store';
 import { dateStrToUtcDate } from '../../util/date-str-to-utc-date';
 import {
   selectTasksDueForDay,
-  selectTasksWithDueTimeForRange,
+  selectTasksWithDueTimeForDay,
 } from '../tasks/store/task.selectors';
-import { getDateRangeForDay } from '../../util/get-date-range-for-day';
 import { first, map, switchMap, withLatestFrom } from 'rxjs/operators';
 import { GlobalTrackingIntervalService } from '../../core/global-tracking-interval/global-tracking-interval.service';
 import { getDbDateStr } from '../../util/get-db-date-str';
@@ -45,8 +44,8 @@ export class AddTasksForTomorrowService {
   private _dueWithTimeForTomorrow$: Observable<TaskWithDueTime[]> =
     this._tomorrowDate$.pipe(
       switchMap((dt) =>
-        this._store.select(selectTasksWithDueTimeForRange, {
-          ...getDateRangeForDay(dt.getTime()),
+        this._store.select(selectTasksWithDueTimeForDay, {
+          day: getDbDateStr(dt),
         }),
       ),
     );
@@ -181,8 +180,8 @@ export class AddTasksForTomorrowService {
     // Get tasks due for today
     const [dueWithTime, dueWithDay] = await firstValueFrom(
       combineLatest([
-        this._store.select(selectTasksWithDueTimeForRange, {
-          ...getDateRangeForDay(todayDate.getTime()),
+        this._store.select(selectTasksWithDueTimeForDay, {
+          day: todayStr,
         }),
         this._store.select(selectTasksDueForDay, { day: getDbDateStr(todayDate) }),
       ]).pipe(first()),
