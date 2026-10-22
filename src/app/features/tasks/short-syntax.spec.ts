@@ -4206,7 +4206,13 @@ describe('shortSyntax localized dates', () => {
     it('should keep an email before a full date word without adding dates', async () => {
       for (const [locale, template] of [
         [DEFAULT_DATE_INPUT_LOCALE, 'Mail max@DOMAIN tomorrow reply'],
+        [DEFAULT_DATE_INPUT_LOCALE, 'Mail max@DOMAIN, tomorrow reply'],
+        [DEFAULT_DATE_INPUT_LOCALE, 'Mail <max@DOMAIN> tomorrow reply'],
+        [DEFAULT_DATE_INPUT_LOCALE, 'Mail max@DOMAIN. tomorrow reply'],
         [{ language: 'de', isDayFirst: true }, 'Mail an max@DOMAIN morgen beantworten'],
+        [{ language: 'de', isDayFirst: true }, 'Mail an max@DOMAIN, morgen beantworten'],
+        [{ language: 'de', isDayFirst: true }, 'Mail an <max@DOMAIN> morgen beantworten'],
+        [{ language: 'de', isDayFirst: true }, 'Mail an max@DOMAIN. morgen beantworten'],
       ] as const) {
         for (const domain of ['example.com', 'firma2.de']) {
           const title = template.replace('DOMAIN', domain);
