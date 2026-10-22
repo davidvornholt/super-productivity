@@ -11,7 +11,8 @@ export const TASK_TIME_BUFFER_FEATURE_KEY = 'taskTimeBuffer' as const;
  * every second (see TaskTimeSyncService.addTick).
  *
  * Local state, never persisted. taskTimeBufferMetaReducer adds the buffer to
- * its task before any other action reduces, and StateSnapshotService adds it to
+ * its task before other actions (apart from the local focus display tick) reduce,
+ * and StateSnapshotService adds it to
  * every snapshot, so only selector reads between two actions miss it.
  */
 export interface TaskTimeBuffer {

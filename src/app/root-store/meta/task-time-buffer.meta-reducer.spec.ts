@@ -21,11 +21,22 @@ import { TimeTrackingState } from '../../features/time-tracking/time-tracking.mo
 import { roundTsToMinutes } from '../../util/round-ts-to-minutes';
 import { taskTimeBufferMetaReducer } from './task-time-buffer.meta-reducer';
 
+import * as focusActions from '../../features/focus-mode/store/focus-mode.actions';
+import {
+  focusModeReducer,
+  initialState as initialFocusState,
+} from '../../features/focus-mode/store/focus-mode.reducer';
+import {
+  FocusModeMode,
+  FocusModeState,
+} from '../../features/focus-mode/focus-mode.model';
+
 const DAY = '2026-01-05';
 const TICK_AT = new Date(2026, 0, 5, 10, 0, 0).getTime();
 const STAMPS = { firstTickAt: TICK_AT, lastTickAt: TICK_AT };
 
 interface TestState {
+  focusMode: FocusModeState;
   [TASK_FEATURE_NAME]: TaskState;
   [TIME_TRACKING_FEATURE_KEY]: TimeTrackingState;
   [TASK_TIME_BUFFER_FEATURE_KEY]: TaskTimeBuffer | null;
@@ -43,6 +54,7 @@ describe('taskTimeBufferMetaReducer', () => {
   const otherTask: Task = { ...task, id: 'task-2', title: 'task-2' };
 
   const innerReducer = combineReducers({
+    focusMode: focusModeReducer,
     [TASK_FEATURE_NAME]: taskReducer,
     [TIME_TRACKING_FEATURE_KEY]: timeTrackingReducer,
     [TASK_TIME_BUFFER_FEATURE_KEY]: taskTimeBufferReducer,
@@ -53,6 +65,7 @@ describe('taskTimeBufferMetaReducer', () => {
   >;
 
   const createState = (buffer: TaskTimeBuffer | null = null): TestState => ({
+    focusMode: initialFocusState,
     [TASK_FEATURE_NAME]: {
       ...initialTaskState,
       ids: [task.id, otherTask.id],
@@ -103,6 +116,44 @@ describe('taskTimeBufferMetaReducer', () => {
       date: DAY,
       duration: 3000,
     });
+  });
+
+  for (const mode of [FocusModeMode.Pomodoro, FocusModeMode.Flowtime]) {
+    it(`keeps task time buffered while the ${mode} display timer ticks`, () => {
+      let state = reducer(createState(), focusActions.setFocusModeMode({ mode }));
+      state = reducer(state, focusActions.startFocusSession({ duration: 25000 }));
+      const tasks = state.tasks;
+      const stamps = state.timeTracking;
+      for (let i = 0; i < 20; i++) {
+        jasmine.clock().tick(1000);
+        state = reducer(state, bufferTick());
+        state = reducer(state, focusActions.tick());
+      }
+      expect(state.tasks).toBe(tasks);
+      expect(state.timeTracking).toBe(stamps);
+      expect(state.taskTimeBuffer?.duration).toBe(20000);
+      expect(state.focusMode.timer.elapsed).toBe(20000);
+      // A semantic transition still exposes every buffered second immediately.
+      state = reducer(state, focusActions.pauseFocusSession({}));
+      expect(timeSpentOf(state)).toBe(80000);
+      expect(state.taskTimeBuffer).toBeNull();
+    });
+  }
+
+  it('flushes on focus completion after the final display tick', () => {
+    let state = reducer(
+      createState(),
+      focusActions.setFocusModeMode({ mode: FocusModeMode.Pomodoro }),
+    );
+    state = reducer(state, focusActions.startFocusSession({ duration: 1000 }));
+    jasmine.clock().tick(1000);
+    state = reducer(state, bufferTick());
+    state = reducer(state, focusActions.tick());
+    expect(state.focusMode.timer.isRunning).toBeFalse();
+    expect(state.taskTimeBuffer?.duration).toBe(1000);
+    state = reducer(state, focusActions.completeFocusSession({ isManual: false }));
+    expect(timeSpentOf(state)).toBe(61000);
+    expect(state.taskTimeBuffer).toBeNull();
   });
 
   it('adds the buffer to its task before any other action reduces', () => {
