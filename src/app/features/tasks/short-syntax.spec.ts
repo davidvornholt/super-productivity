@@ -4203,6 +4203,20 @@ describe('shortSyntax localized dates', () => {
   // A UI-language short word is a date only right after the trigger: further in
   // it is ordinary text, and a match there would eat the title up to it
   describe('UI-language words inside a token', () => {
+    it('should keep an email before an English date word in prose', async () => {
+      const title = 'Mail max@example.com tomorrow reply';
+      const r = await parseIn({ language: 'en', isDayFirst: false }, title);
+      expect(r?.taskChanges.title ?? title).toBe(title);
+      expect(r?.taskChanges.dueWithTime).toBeUndefined();
+    });
+
+    it('should keep an email before a full German date word in prose', async () => {
+      const title = 'Mail an max@example.com morgen beantworten';
+      const r = await parseIn({ language: 'de', isDayFirst: true }, title);
+      expect(r?.taskChanges.title ?? title).toBe(title);
+      expect(r?.taskChanges.dueWithTime).toBeUndefined();
+    });
+
     it('should not read a German short word after an email address as a date', async () => {
       const title = 'Mail an max@firma.de so bald wie möglich';
       const r = await parseIn({ language: 'de', isDayFirst: true }, title);
