@@ -56,12 +56,25 @@ export const TimeTrackingActions = createActionGroup({
       date: string;
       duration: number;
       isFromTrackingReminder: boolean;
+      /** Original tick times when materializing the local desktop buffer. */
+      workStart?: number;
+      workEnd?: number;
       /**
        * Time logged after the fact for a day other than today (Local REST API
        * `POST /tasks/:id/time`). Only the task's time changes: no work start/end
        * stamp and no auto-plan for today. Local-only action, never persisted.
        */
       isBackfill?: boolean;
+    }>(),
+    /**
+     * A tracking tick that leaves the task's whole minutes unchanged, buffered
+     * on desktop instead of added to the task (see TaskTimeSyncService.addTick).
+     * Local-only action, never persisted.
+     */
+    'Buffer time spent': props<{
+      taskId: string;
+      date: string;
+      duration: number;
     }>(),
     'Update whole State': props<{
       newState: TimeTrackingState;

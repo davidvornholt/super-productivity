@@ -203,7 +203,10 @@ describe('WorklogService context-aware loading', () => {
         },
         {
           provide: TaskService,
-          useValue: { taskFeatureState$: of({ ids: [], entities: {} }) },
+          useValue: {
+            taskFeatureState$: of({ ids: [], entities: {} }),
+            flushAccumulatedTimeSpent: () => {},
+          },
         },
         {
           provide: TimeTrackingService,

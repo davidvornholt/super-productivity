@@ -60,12 +60,7 @@ export class TaskSummaryTableComponent {
   readonly isWontDoTask = isWontDoTask;
 
   updateTimeSpentTodayForTask(task: Task, newVal: number | string): void {
-    this._taskService.updateEverywhere(task.id, {
-      timeSpentOnDay: {
-        ...task.timeSpentOnDay,
-        [this.day()]: +newVal,
-      },
-    });
+    this._taskService.updateTimeSpentOnDayEverywhere(task.id, this.day(), +newVal);
     this.updated.emit();
   }
 

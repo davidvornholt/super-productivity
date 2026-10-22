@@ -23,6 +23,15 @@ export interface LocalRestApiFeatureBridge {
    */
   addTimeSpentOnDay(task: object, durationMs: number, date: string): void;
 
+  /** Materialize tracked time before reading a map for an absolute time edit. */
+  flushTaskTime(taskId: string): void;
+
+  /**
+   * The tracked task with its time to the second. The store holds desktop
+   * tick time back until the task's minutes change.
+   */
+  currentTask(): Promise<{ id: string } | null>;
+
   /**
    * Moves a top-level task to another project the way the UI does, so a
    * recurring task's repeat config and instances follow it, without asking.

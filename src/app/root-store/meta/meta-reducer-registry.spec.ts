@@ -4,6 +4,7 @@ import { operationCaptureMetaReducer } from '../../op-log/capture/operation-capt
 import { bulkOperationsMetaReducer } from '../../op-log/apply/bulk-hydration.meta-reducer';
 import { undoTaskDeleteMetaReducer } from './undo-task-delete.meta-reducer';
 import { reducerFailureGuardMetaReducer } from './reducer-failure-guard.meta-reducer';
+import { taskTimeBufferMetaReducer } from './task-time-buffer.meta-reducer';
 
 describe('META_REDUCERS registry', () => {
   // The dev-mode validateMetaReducerOrdering() covers index 0/1/last; this
@@ -14,6 +15,15 @@ describe('META_REDUCERS registry', () => {
     // The guard must wrap every reducer that handles loadAllData — i.e. sit
     // before the Phase 3+ meta-reducers, not just anywhere in the chain.
     expect(guardIdx).toBeLessThan(META_REDUCERS.indexOf(undoTaskDeleteMetaReducer));
+  });
+
+  it('adds buffered tick time inside op capture and bulk apply, before task reducers', () => {
+    const idx = META_REDUCERS.indexOf(taskTimeBufferMetaReducer);
+    // Capture must see only the dispatched action, never the synthesized
+    // addTimeSpent, and a bulk replay must start from the buffered time.
+    expect(idx).toBeGreaterThan(META_REDUCERS.indexOf(bulkOperationsMetaReducer));
+    // Undo-delete and every task reducer must see the buffered time.
+    expect(idx).toBeLessThan(META_REDUCERS.indexOf(undoTaskDeleteMetaReducer));
   });
 
   it('keeps the hard ordering constraints intact', () => {

@@ -4,18 +4,14 @@ import { setCurrentTask, unsetCurrentTask } from './task.actions';
 import { select, Store } from '@ngrx/store';
 import {
   filter,
-  map,
   startWith,
   take,
   tap,
   throttleTime,
   withLatestFrom,
 } from 'rxjs/operators';
-import {
-  selectCurrentTask,
-  selectCurrentTaskId,
-  selectTaskEntities,
-} from './task.selectors';
+import { selectCurrentTaskId, selectTaskEntities } from './task.selectors';
+import { selectCurrentTaskWithBufferedTime } from './task-time-buffer.selectors';
 import { selectTodayTaskIds } from '../../work-context/store/work-context.selectors';
 import { GlobalConfigService } from '../../config/global-config.service';
 import {
@@ -64,7 +60,7 @@ export class TaskElectronEffects {
     window.ea.on(IPC.REQUEST_CURRENT_TASK_FOR_TASK_WIDGET, () => {
       this._store$
         .pipe(
-          select(selectCurrentTask),
+          select(selectCurrentTaskWithBufferedTime),
           withLatestFrom(
             this._store$.pipe(select(selectIsOverlayShown)),
             this._focusModeService.currentSessionTime$,
@@ -117,6 +113,7 @@ export class TaskElectronEffects {
           setCurrentTask,
           unsetCurrentTask,
           TimeTrackingActions.addTimeSpent,
+          TimeTrackingActions.bufferTimeSpent,
           showFocusOverlay,
           hideFocusOverlay,
           startFocusSession,
@@ -128,13 +125,14 @@ export class TaskElectronEffects {
           // without an active task (addTimeSpent is gated on currentTask.id).
           tick,
         ),
-        // addTimeSpent and tick both fire every 1s during an active-task focus
-        // session (same shared globalInterval source), so collapse them into a
-        // single IPC/sec. Leading+trailing preserves immediate feedback for the
-        // non-tick actions (setCurrentTask, startFocusSession, ...).
+        // A tracking tick (addTimeSpent or bufferTimeSpent) and tick both fire
+        // every 1s during an active-task focus session (same shared
+        // globalInterval source), so collapse them into a single IPC/sec.
+        // Leading+trailing preserves immediate feedback for the non-tick
+        // actions (setCurrentTask, startFocusSession, ...).
         throttleTime(500, undefined, { leading: true, trailing: true }),
         withLatestFrom(
-          this._store$.pipe(select(selectCurrentTask)),
+          this._store$.pipe(select(selectCurrentTaskWithBufferedTime)),
           this._store$.pipe(select(selectIsOverlayShown)),
           this._focusModeService.currentSessionTime$.pipe(startWith(0)),
         ),
@@ -187,25 +185,36 @@ export class TaskElectronEffects {
   setTaskBarProgress$ = createEffect(
     () =>
       this._actions$.pipe(
-        ofType(TimeTrackingActions.addTimeSpent),
+        ofType(TimeTrackingActions.addTimeSpent, TimeTrackingActions.bufferTimeSpent),
         // The bar shows the tracked task's progress; time added to any other
         // task (e.g. back-filled via the Local REST API) must not drive it.
         withLatestFrom(this._store$.select(selectCurrentTaskId)),
-        filter(([{ task }, currentTaskId]) => task.id === currentTaskId),
-        map(([action]) => action),
+        filter(
+          ([action, currentTaskId]) =>
+            ('task' in action ? action.task.id : action.taskId) === currentTaskId,
+        ),
         // The OS taskbar progress bar moves imperceptibly per second; throttling
         // collapses 1 IPC/sec into ~1 IPC/3s. Leading+trailing keeps the first
         // tick after start instant and the final value at the end of a window.
         throttleTime(3000, undefined, { leading: true, trailing: true }),
-        withLatestFrom(this._store$.select(selectIsOsProgressBarOwnedBySession)),
+        // Read the task after the throttle so the bar shows its latest time,
+        // buffered ticks included.
+        withLatestFrom(
+          this._store$.select(selectCurrentTaskWithBufferedTime),
+          this._store$.select(selectIsOsProgressBarOwnedBySession),
+        ),
         // Stand down while a timed focus session owns the OS progress bar, so
         // that surface only ever has one writer. Gating on the focus overlay
         // being *shown* instead left both writers active whenever the overlay
         // was hidden, and the bar cycled between the two values every second
         // (#9944). Open-ended (Flowtime) sessions own nothing, so the task
         // progress below keeps the bar meaningful there.
-        filter(([a, isOwnedByFocusSession]) => !isOwnedByFocusSession),
-        tap(([{ task }]) => {
+        filter(([, , isOwnedByFocusSession]) => !isOwnedByFocusSession),
+        tap(([, task]) => {
+          // Tracking can stop within the throttle window.
+          if (!task) {
+            return;
+          }
           const progress = task.timeSpent / task.timeEstimate;
           window.ea.setProgressBar({
             progress,

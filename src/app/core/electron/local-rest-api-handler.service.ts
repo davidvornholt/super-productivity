@@ -515,7 +515,7 @@ export class LocalRestApiHandlerService {
     requestId: string,
   ): Promise<LocalRestApiResponsePayload> {
     const [currentTask, allTasks] = await Promise.all([
-      firstValueFrom(this._taskService.currentTask$),
+      this._featureBridge.currentTask(),
       firstValueFrom(this._taskService.allTasks$),
     ]);
 
@@ -560,7 +560,7 @@ export class LocalRestApiHandlerService {
   private async _handleGetCurrentTask(
     requestId: string,
   ): Promise<LocalRestApiResponsePayload> {
-    const currentTask = await firstValueFrom(this._taskService.currentTask$);
+    const currentTask = await this._featureBridge.currentTask();
     return createSuccessResponse(requestId, 200, currentTask);
   }
 
@@ -1022,6 +1022,8 @@ export class LocalRestApiHandlerService {
       if ('error' in parsed) {
         return createErrorResponse(requestId, 400, parsed.code, parsed.error);
       }
+      // Both the absolute edit and POST's daily limit need the complete day map.
+      this._featureBridge.flushTaskTime(taskId);
       const task = await this._getTaskById(taskId);
       if (!task) {
         return createErrorResponse(requestId, 404, 'TASK_NOT_FOUND', 'Task not found');

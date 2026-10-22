@@ -10,10 +10,8 @@ import { PlannerActions } from '../features/planner/store/planner.actions';
 import { TaskWithSubTasks } from '../features/tasks/task.model';
 import { PluginHooks } from './plugin-api.model';
 import { PluginI18nService } from './plugin-i18n.service';
-import {
-  selectCurrentTask,
-  selectTaskById,
-} from '../features/tasks/store/task.selectors';
+import { selectTaskById } from '../features/tasks/store/task.selectors';
+import { selectCurrentTaskWithBufferedTime } from '../features/tasks/store/task-time-buffer.selectors';
 import { selectPluginUserDataFeatureState } from './store/plugin-user-data.reducer';
 import { SyncTriggerService } from '../imex/sync/sync-trigger.service';
 import { HydrationStateService } from '../op-log/apply/hydration-state.service';
@@ -323,11 +321,11 @@ describe('PluginHooksEffects', () => {
 
   describe('onCurrentTaskChange$', () => {
     it('should dispatch CURRENT_TASK_CHANGE with { current, previous: null } when a task becomes active from idle', (done) => {
-      store.overrideSelector(selectCurrentTask, null);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, null);
       actions$ = of();
 
       const sub = effects.onCurrentTaskChange$.subscribe();
-      store.overrideSelector(selectCurrentTask, mockTask);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, mockTask);
       store.refreshState();
 
       // give microtasks a tick to flush
@@ -342,11 +340,11 @@ describe('PluginHooksEffects', () => {
     });
 
     it('should dispatch CURRENT_TASK_CHANGE with { current: null, previous } when the active task is stopped', (done) => {
-      store.overrideSelector(selectCurrentTask, mockTask);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, mockTask);
       actions$ = of();
 
       const sub = effects.onCurrentTaskChange$.subscribe();
-      store.overrideSelector(selectCurrentTask, null);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, null);
       store.refreshState();
 
       setTimeout(() => {
@@ -361,11 +359,11 @@ describe('PluginHooksEffects', () => {
 
     it('should emit both previous and current when switching between tasks', (done) => {
       const otherTask = createMockTask({ id: 'task-other', title: 'Other Task' });
-      store.overrideSelector(selectCurrentTask, mockTask);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, mockTask);
       actions$ = of();
 
       const sub = effects.onCurrentTaskChange$.subscribe();
-      store.overrideSelector(selectCurrentTask, otherTask);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, otherTask);
       store.refreshState();
 
       setTimeout(() => {
@@ -379,14 +377,17 @@ describe('PluginHooksEffects', () => {
     });
 
     it('should not re-emit when the same task is updated in place', (done) => {
-      store.overrideSelector(selectCurrentTask, null);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, null);
       actions$ = of();
 
       const sub = effects.onCurrentTaskChange$.subscribe();
-      store.overrideSelector(selectCurrentTask, mockTask);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, mockTask);
       store.refreshState();
       // Same id, different object reference (e.g. title change while running).
-      store.overrideSelector(selectCurrentTask, { ...mockTask, title: 'Renamed' });
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, {
+        ...mockTask,
+        title: 'Renamed',
+      });
       store.refreshState();
 
       setTimeout(() => {
@@ -404,15 +405,15 @@ describe('PluginHooksEffects', () => {
       // Simulates: start task → plugin mutates task (addTag) → stop. The stop
       // payload's `previous` must reflect the post-mutation task state so a
       // taskStopped handler can read the freshly-added field.
-      store.overrideSelector(selectCurrentTask, mockTask);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, mockTask);
       actions$ = of();
 
       const sub = effects.onCurrentTaskChange$.subscribe();
 
       const mutatedTask = createMockTask({ ...mockTask, tagIds: ['in-progress'] });
-      store.overrideSelector(selectCurrentTask, mutatedTask);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, mutatedTask);
       store.refreshState();
-      store.overrideSelector(selectCurrentTask, null);
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, null);
       store.refreshState();
 
       setTimeout(() => {

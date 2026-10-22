@@ -109,6 +109,10 @@ import {
 } from '../features/reminder/store/reminder.reducer';
 import { PluginOAuthLifecycleEffects } from '../plugins/oauth/plugin-oauth-lifecycle.effects';
 import { ReducerFailureSnackEffects } from './meta/reducer-failure-snack.effects';
+import {
+  TASK_TIME_BUFFER_FEATURE_KEY,
+  taskTimeBufferReducer,
+} from '../features/tasks/store/task-time-buffer.reducer';
 @NgModule({
   declarations: [],
   imports: [
@@ -154,6 +158,7 @@ import { ReducerFailureSnackEffects } from './meta/reducer-failure-snack.effects
     EffectsModule.forFeature([TaskRepeatCfgEffects, TaskRepeatCleanupEffects]),
 
     StoreModule.forFeature(TASK_FEATURE_NAME, taskReducer),
+    StoreModule.forFeature(TASK_TIME_BUFFER_FEATURE_KEY, taskTimeBufferReducer),
     EffectsModule.forFeature([
       TaskInternalEffects,
       TaskRelatedModelEffects,

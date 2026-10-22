@@ -19,6 +19,7 @@ import {
 } from '@angular/material/dialog';
 import { Task, TaskCopy, TimeSpentOnDayCopy } from '../task.model';
 import { TaskService } from '../task.service';
+import { TaskTimeSyncService } from '../task-time-sync.service';
 import { getTodayStr } from '../util/get-today-str';
 import { createTaskCopy } from '../util/create-task-copy';
 import {
@@ -70,6 +71,7 @@ export class DialogTimeEstimateComponent implements AfterViewInit {
   private _matDialogRef = inject<MatDialogRef<DialogTimeEstimateComponent>>(MatDialogRef);
   private _matDialog = inject(MatDialog);
   private _taskService = inject(TaskService);
+  private _taskTimeSync = inject(TaskTimeSyncService);
   private _cd = inject(ChangeDetectorRef);
   private _el = inject(ElementRef);
   private _dateTimeFormatService = inject(DateTimeFormatService);
@@ -118,13 +120,43 @@ export class DialogTimeEstimateComponent implements AfterViewInit {
   }
 
   submit(): void {
-    this._taskService.update(this.taskCopy.id, {
-      timeEstimate: this.taskCopy.timeEstimate,
-      timeSpentOnDay: this.timeSpentOnDayCopy,
-    });
-    this._matDialogRef.close({
-      timeEstimate: this.taskCopy.timeEstimate,
-      timeSpentOnDay: this.timeSpentOnDayCopy,
+    const changes: Partial<TaskCopy> = {};
+    if ((this.taskCopy.timeEstimate || 0) !== (this.task.timeEstimate || 0)) {
+      changes.timeEstimate = this.taskCopy.timeEstimate;
+    }
+    const before = this.task.timeSpentOnDay || {};
+    const after = this.timeSpentOnDayCopy;
+    const changedDays = [
+      ...new Set([...Object.keys(before), ...Object.keys(after)]),
+    ].filter((day) => (before[day] || 0) !== (after[day] || 0));
+    if (changedDays.length) {
+      this._taskTimeSync.flushOne(this.task.id);
+    }
+    // The dialog copy may predate buffered ticks or edits made while it was open.
+    // Only explicitly edited days replace values in the latest task's map.
+    this._taskService.getByIdOnce$(this.task.id).subscribe((currentTask) => {
+      if (!currentTask) {
+        this._matDialogRef.close();
+        return;
+      }
+      if (changedDays.length) {
+        const timeSpentOnDay = { ...currentTask.timeSpentOnDay };
+        for (const day of changedDays) {
+          if (after[day]) {
+            timeSpentOnDay[day] = after[day];
+          } else {
+            delete timeSpentOnDay[day];
+          }
+        }
+        changes.timeSpentOnDay = timeSpentOnDay;
+      }
+      if (Object.keys(changes).length) {
+        this._taskService.update(this.taskCopy.id, changes);
+      }
+      this._matDialogRef.close({
+        timeEstimate: changes.timeEstimate ?? currentTask.timeEstimate,
+        timeSpentOnDay: changes.timeSpentOnDay ?? currentTask.timeSpentOnDay,
+      });
     });
   }
 

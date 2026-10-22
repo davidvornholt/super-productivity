@@ -5,6 +5,7 @@ import { bulkOperationsMetaReducer } from '../../op-log/apply/bulk-hydration.met
 import { loadAllDataFailureGuardMetaReducer } from '../../op-log/apply/load-all-data-failure-guard.meta-reducer';
 import { reducerFailureGuardMetaReducer } from './reducer-failure-guard.meta-reducer';
 import { undoTaskDeleteMetaReducer } from './undo-task-delete.meta-reducer';
+import { taskTimeBufferMetaReducer } from './task-time-buffer.meta-reducer';
 import { taskSharedCrudMetaReducer } from './task-shared-meta-reducers/task-shared-crud.reducer';
 import { taskBatchUpdateMetaReducer } from './task-shared-meta-reducers/task-batch-update.reducer';
 import { taskSharedLifecycleMetaReducer } from './task-shared-meta-reducers/task-shared-lifecycle.reducer';
@@ -49,6 +50,11 @@ import { actionLoggerReducer } from './action-logger.reducer';
  * hydration so startup can fall back to op-log replay instead of silently
  * freezing the store. Must wrap every reducer that handles loadAllData,
  * i.e. precede Phases 3-8. Pure pass-through outside hydration.
+ *
+ * ## Phase 2.75: Buffered Tick Time
+ * Adds tracking time buffered on desktop to its task before any later phase
+ * reads task state, so they all see the task time as if every tick had been
+ * stored straight away.
  *
  * ## Phase 3: Undo/Delete Capture
  * Captures task context before deletion for undo functionality.
@@ -124,6 +130,12 @@ export const META_REDUCERS: MetaReducer[] = [
   // store with a dead state observable. Must wrap every reducer that handles
   // loadAllData, i.e. run before Phases 3-8. Pure pass-through otherwise.
   loadAllDataFailureGuardMetaReducer,
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASE 2.75: BUFFERED TICK TIME
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Adds buffered tracking time to its task before Phases 3-8 read task state.
+  taskTimeBufferMetaReducer,
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PHASE 3: UNDO/DELETE CAPTURE

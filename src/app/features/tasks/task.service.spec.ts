@@ -29,6 +29,7 @@ import { signal } from '@angular/core';
 import { DeletedTaskIssueSidecarService } from '../issue/two-way-sync/deleted-task-issue-sidecar.service';
 import { TaskTimeSyncService } from './task-time-sync.service';
 import { selectTaskEntities } from './store/task.selectors';
+import { initialTaskState } from './store/task.reducer';
 
 describe('TaskService', () => {
   let service: TaskService;
@@ -315,38 +316,55 @@ describe('TaskService', () => {
     it('should dispatch deleteTask', () => {
       const task = createMockTaskWithSubTasks(createMockTask('task-1'));
 
+      store.setState({
+        tasks: { ...initialTaskState, ids: [task.id], entities: { [task.id]: task } },
+      });
       service.remove(task);
 
       expect(store.dispatch).toHaveBeenCalledWith(TaskSharedActions.deleteTask({ task }));
     });
 
-    it('should clear pending time for the task and its subtasks', () => {
-      const clearOneSpy = spyOn(taskTimeSync, 'clearOne');
+    it('should flush pending time for the task and its subtasks', () => {
+      const flushOneSpy = spyOn(taskTimeSync, 'flushOne');
       const subTask = createMockTask('subtask-1', { parentId: 'task-1' });
       const task = createMockTaskWithSubTasks(
         createMockTask('task-1', { subTaskIds: ['subtask-1'] }),
         [subTask],
       );
 
+      store.setState({
+        tasks: {
+          ...initialTaskState,
+          ids: [task.id, subTask.id],
+          entities: { [task.id]: task, [subTask.id]: subTask },
+        },
+      });
       service.remove(task);
 
-      expect(clearOneSpy).toHaveBeenCalledWith('task-1');
-      expect(clearOneSpy).toHaveBeenCalledWith('subtask-1');
+      expect(flushOneSpy).toHaveBeenCalledWith('task-1');
+      expect(flushOneSpy).toHaveBeenCalledWith('subtask-1');
     });
 
     // Regression: deleting a sub-task via keyboard shortcut (Backspace) passes the
     // raw Task entity, which has no `subTasks` array — remove() must not throw. #9280
     it('should still dispatch when removing a sub-task without a subTasks array', () => {
-      const clearOneSpy = spyOn(taskTimeSync, 'clearOne');
+      const flushOneSpy = spyOn(taskTimeSync, 'flushOne');
       const subTask = createMockTask('subtask-1', {
         parentId: 'task-1',
       }) as TaskWithSubTasks;
 
+      store.setState({
+        tasks: {
+          ...initialTaskState,
+          ids: [subTask.id],
+          entities: { [subTask.id]: subTask },
+        },
+      });
       expect(() => service.remove(subTask)).not.toThrow();
       expect(store.dispatch).toHaveBeenCalledWith(
-        TaskSharedActions.deleteTask({ task: subTask }),
+        TaskSharedActions.deleteTask({ task: { ...subTask, subTasks: [] } }),
       );
-      expect(clearOneSpy).toHaveBeenCalledWith('subtask-1');
+      expect(flushOneSpy).toHaveBeenCalledWith('subtask-1');
     });
   });
 
@@ -369,7 +387,7 @@ describe('TaskService', () => {
     });
 
     it('should include cascade-deleted subtasks in conflict-recovery snapshots', () => {
-      const clearOneSpy = spyOn(taskTimeSync, 'clearOne');
+      const flushOneSpy = spyOn(taskTimeSync, 'flushOne');
       const parent = createMockTask('parent', { subTaskIds: ['subtask'] });
       const subtask = createMockTask('subtask', { parentId: 'parent' });
       store.overrideSelector(selectTaskEntities, { parent, subtask });
@@ -382,7 +400,26 @@ describe('TaskService', () => {
         | undefined;
       expect(action?.taskIds).toEqual(['parent']);
       expect(action?.tasks?.map(({ id }) => id)).toEqual(['parent', 'subtask']);
-      expect(clearOneSpy.calls.allArgs()).toEqual([['parent'], ['subtask']]);
+      expect(flushOneSpy.calls.allArgs()).toEqual([['parent'], ['subtask']]);
+    });
+
+    it('should snapshot tasks after flushing their pending time', () => {
+      const task = createMockTask('task-1', { timeSpent: 0 });
+      store.overrideSelector(selectTaskEntities, { [task.id]: task });
+      store.refreshState();
+      spyOn(taskTimeSync, 'flushOne').and.callFake(() => {
+        store.overrideSelector(selectTaskEntities, {
+          [task.id]: { ...task, timeSpent: 59000 },
+        });
+        store.refreshState();
+      });
+
+      service.removeMultipleTasks([task.id]);
+
+      const action = (store.dispatch as jasmine.Spy).calls.mostRecent().args[0] as
+        | ReturnType<typeof TaskSharedActions.deleteTasks>
+        | undefined;
+      expect(action?.tasks?.map(({ timeSpent }) => timeSpent)).toEqual([59000]);
     });
   });
 
@@ -567,7 +604,89 @@ describe('TaskService', () => {
     });
   });
 
+  describe('updateTimeSpentOnDayEverywhere', () => {
+    it('should preserve untouched days from fresh active and archived tasks', async () => {
+      const today = '2026-01-05';
+      const yesterday = '2026-01-04';
+      const stale = createMockTask('task-1', {
+        timeSpentOnDay: { [today]: 1000, [yesterday]: 120000 },
+      });
+      const fresh = { ...stale, timeSpentOnDay: { [today]: 4000, [yesterday]: 120000 } };
+      const taskArchive = TestBed.inject(
+        TaskArchiveService,
+      ) as jasmine.SpyObj<TaskArchiveService>;
+      const update = spyOn(service, 'update');
+      const flush = spyOn(taskTimeSync, 'flushOne');
+      for (const archived of [false, true]) {
+        store.setState({
+          tasks: { ...initialTaskState, entities: archived ? {} : { [stale.id]: stale } },
+        });
+        flush.and.callFake(() => {
+          if (!archived) {
+            store.setState({
+              tasks: { ...initialTaskState, entities: { [fresh.id]: fresh } },
+            });
+          }
+        });
+        taskArchive.getById.and.resolveTo(fresh);
+
+        await service.updateTimeSpentOnDayEverywhere(stale.id, yesterday, 600000);
+
+        expect(archived ? taskArchive.updateTask : update).toHaveBeenCalledWith(
+          stale.id,
+          {
+            timeSpentOnDay: { [today]: 4000, [yesterday]: 600000 },
+          },
+        );
+      }
+    });
+  });
+
   describe('moveToArchive', () => {
+    it('should stop tracking and persist fresh family times before removing tasks', async () => {
+      const day = '2026-01-05';
+      const parent = createMockTask('parent', { subTaskIds: ['child'] });
+      const child = createMockTask('child', {
+        parentId: parent.id,
+        timeSpent: 1000,
+        timeSpentOnDay: { [day]: 1000 },
+      });
+      const freshChild = { ...child, timeSpent: 4000, timeSpentOnDay: { [day]: 4000 } };
+      const freshParent = { ...parent, timeSpent: 4000, timeSpentOnDay: { [day]: 4000 } };
+      store.setState({
+        tasks: {
+          ...initialTaskState,
+          entities: { parent, child },
+          currentTaskId: child.id,
+        },
+      });
+      const pause = spyOn(service, 'pauseCurrent');
+      spyOn(taskTimeSync, 'flushOne').and.callFake(() => {
+        store.overrideSelector(selectTaskEntities, {
+          parent: freshParent,
+          child: freshChild,
+        });
+        store.refreshState();
+      });
+      const freshFamily = { ...freshParent, subTasks: [freshChild] };
+      archiveService.moveTasksToArchiveAndFlushArchiveIfDue.and.callFake(
+        async (tasks) => {
+          expect(pause).toHaveBeenCalled();
+          expect(tasks).toEqual([freshFamily]);
+          expect(store.dispatch).not.toHaveBeenCalledWith(
+            jasmine.objectContaining({ type: TaskSharedActions.moveToArchive.type }),
+          );
+        },
+      );
+
+      await service.moveToArchive({ ...parent, subTasks: [child] });
+
+      expect(taskTimeSync.flushOne).toHaveBeenCalledWith(child.id);
+      expect(store.dispatch).toHaveBeenCalledWith(
+        TaskSharedActions.moveToArchive({ tasks: [freshFamily] }),
+      );
+    });
+
     it('should persist parent tasks before dispatching the archive action', async () => {
       const task = createMockTaskWithSubTasks(createMockTask('task-1'));
       const callOrder: string[] = [];
@@ -636,7 +755,7 @@ describe('TaskService', () => {
 
     it('should dispatch moveToArchive and call archive service for parent tasks', async () => {
       const task = createMockTaskWithSubTasks(
-        createMockTask('task-1', { projectId: 'test-project' }),
+        store.selectSignal(selectTaskEntities)()['task-1']!,
       );
 
       await service.moveToArchive(task);
@@ -650,9 +769,10 @@ describe('TaskService', () => {
     });
 
     it('should handle array of tasks', async () => {
+      const entities = store.selectSignal(selectTaskEntities)();
       const tasks = [
-        createMockTaskWithSubTasks(createMockTask('task-1')),
-        createMockTaskWithSubTasks(createMockTask('task-2')),
+        createMockTaskWithSubTasks(entities['task-1']!),
+        createMockTaskWithSubTasks(entities['task-2']!),
       ];
 
       await service.moveToArchive(tasks);

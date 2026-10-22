@@ -8,11 +8,8 @@ import {
   selectIsOsProgressBarOwnedBySession,
   selectIsOverlayShown,
 } from '../../focus-mode/store/focus-mode.selectors';
-import {
-  selectCurrentTask,
-  selectCurrentTaskId,
-  selectTaskEntities,
-} from './task.selectors';
+import { selectCurrentTaskId, selectTaskEntities } from './task.selectors';
+import { selectCurrentTaskWithBufferedTime } from './task-time-buffer.selectors';
 import { selectTodayTaskIds } from '../../work-context/store/work-context.selectors';
 import { GlobalConfigService } from '../../config/global-config.service';
 import { FocusModeService } from '../../focus-mode/focus-mode.service';
@@ -32,6 +29,7 @@ describe('TaskElectronEffects', () => {
   let actions$: Subject<any>;
   let store: MockStore;
   let setProgressBarSpy: jasmine.Spy;
+  let updateCurrentTaskSpy: jasmine.Spy;
 
   const task: Task = {
     ...DEFAULT_TASK,
@@ -50,13 +48,19 @@ describe('TaskElectronEffects', () => {
       isFromTrackingReminder: false,
     });
 
+  const bufferTimeSpent = (
+    taskId = task.id,
+  ): ReturnType<typeof TimeTrackingActions.bufferTimeSpent> =>
+    TimeTrackingActions.bufferTimeSpent({ taskId, date: '2026-01-05', duration: 1000 });
+
   beforeEach(() => {
     actions$ = new Subject<any>();
     setProgressBarSpy = jasmine.createSpy('setProgressBar');
+    updateCurrentTaskSpy = jasmine.createSpy('updateCurrentTask');
     (window as any).ea = {
       on: () => {},
       onSwitchTask: () => {},
-      updateCurrentTask: () => {},
+      updateCurrentTask: updateCurrentTaskSpy,
       updateTodayTasks: () => {},
       setProgressBar: setProgressBarSpy,
     };
@@ -67,7 +71,7 @@ describe('TaskElectronEffects', () => {
         provideMockActions(() => actions$),
         provideMockStore({
           selectors: [
-            { selector: selectCurrentTask, value: task },
+            { selector: selectCurrentTaskWithBufferedTime, value: task },
             { selector: selectCurrentTaskId, value: task.id },
             { selector: selectTaskEntities, value: { T1: task } },
             { selector: selectTodayTaskIds, value: [] },
@@ -146,6 +150,65 @@ describe('TaskElectronEffects', () => {
         progress: 0.5,
         progressBarMode: 'normal',
       });
+    });
+
+    // Desktop buffers ticks that leave the task's minutes unchanged, so the
+    // bar reads the task with its buffered time rather than the action payload.
+    it('should publish progress including buffered tick time', () => {
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, {
+        ...task,
+        timeSpent: 45 * 60000,
+      });
+      store.refreshState();
+
+      const sub = effects.setTaskBarProgress$.subscribe();
+      actions$.next(bufferTimeSpent());
+      sub.unsubscribe();
+
+      expect(setProgressBarSpy).toHaveBeenCalledOnceWith({
+        progress: 0.75,
+        progressBarMode: 'normal',
+      });
+    });
+
+    it('should ignore buffered time for a task that is not being tracked', () => {
+      const sub = effects.setTaskBarProgress$.subscribe();
+      actions$.next(bufferTimeSpent('OTHER'));
+      sub.unsubscribe();
+
+      expect(setProgressBarSpy).not.toHaveBeenCalled();
+    });
+
+    it('should publish nothing once tracking has stopped', () => {
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, null);
+      store.refreshState();
+
+      const sub = effects.setTaskBarProgress$.subscribe();
+      actions$.next(addTimeSpent());
+      sub.unsubscribe();
+
+      expect(setProgressBarSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('taskChangeElectron$', () => {
+    it('should send the current task with its buffered time on a buffered tick', () => {
+      const exactTask = { ...task, timeSpent: task.timeSpent + 5000 };
+      store.overrideSelector(selectCurrentTaskWithBufferedTime, exactTask);
+      store.refreshState();
+
+      const sub = effects.taskChangeElectron$.subscribe();
+      actions$.next(bufferTimeSpent());
+      sub.unsubscribe();
+
+      expect(updateCurrentTaskSpy).toHaveBeenCalledOnceWith(
+        exactTask,
+        false,
+        0,
+        false,
+        0,
+        'Flowtime',
+      );
     });
   });
 });

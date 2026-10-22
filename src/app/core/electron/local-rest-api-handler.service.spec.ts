@@ -238,9 +238,17 @@ describe('LocalRestApiHandlerService', () => {
 
     featureBridgeMock = jasmine.createSpyObj<LocalRestApiFeatureBridge>(
       'LocalRestApiFeatureBridge',
-      ['issueLink', 'addLiteralSubTask', 'addTimeSpentOnDay', 'moveTaskToProject'],
+      [
+        'issueLink',
+        'addLiteralSubTask',
+        'addTimeSpentOnDay',
+        'flushTaskTime',
+        'currentTask',
+        'moveTaskToProject',
+      ],
     );
     featureBridgeMock.issueLink.and.returnValue(Promise.resolve(''));
+    featureBridgeMock.currentTask.and.returnValue(Promise.resolve(null));
 
     featureRoutes = [];
 
@@ -319,13 +327,18 @@ describe('LocalRestApiHandlerService', () => {
 
     it('should return status with current task info', async () => {
       const mockTask = createMockTask('task-1');
-      Object.defineProperty(taskServiceMock, 'currentTask$', { get: () => of(mockTask) });
+      featureBridgeMock.currentTask.and.returnValue(Promise.resolve(mockTask));
       Object.defineProperty(taskServiceMock, 'allTasks$', { get: () => of([mockTask]) });
 
       const response = await sendRequestAndWait(createRequest('GET', '/status'));
 
       expect(response.body.ok).toBe(true);
       expect(response.status).toBe(200);
+      expect((response.body as { data: unknown }).data).toEqual({
+        currentTask: mockTask,
+        currentTaskId: 'task-1',
+        taskCount: 1,
+      });
     });
   });
 
@@ -3037,15 +3050,14 @@ describe('LocalRestApiHandlerService', () => {
     describe('GET /task-control/current', () => {
       it('should return current task', async () => {
         const mockTask = createMockTask('current-task');
-        Object.defineProperty(taskServiceMock, 'currentTask$', {
-          get: () => of(mockTask),
-        });
+        featureBridgeMock.currentTask.and.returnValue(Promise.resolve(mockTask));
 
         const response = await sendRequestAndWait(
           createRequest('GET', '/task-control/current'),
         );
 
         expect(response.body.ok).toBe(true);
+        expect((response.body as { data: unknown }).data).toEqual(mockTask);
       });
     });
 

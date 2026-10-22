@@ -252,9 +252,10 @@ describe('undoTaskDeleteMetaReducer', () => {
 
     it('should handle task without project', () => {
       const task = createMockTaskWithSubTasks({ projectId: '' });
+      const state = createMockState({ taskEntities: { task1: task } });
       const action = TaskSharedActions.deleteTask({ task });
 
-      metaReducer(baseState, action);
+      metaReducer(state, action);
       const payload = getLastDeletePayload();
 
       expect(payload!.projectContext).toBeUndefined();
@@ -262,9 +263,10 @@ describe('undoTaskDeleteMetaReducer', () => {
 
     it('should handle task with non-existent project', () => {
       const task = createMockTaskWithSubTasks({ projectId: 'nonExistentProject' });
+      const state = createMockState({ taskEntities: { task1: task } });
       const action = TaskSharedActions.deleteTask({ task });
 
-      metaReducer(baseState, action);
+      metaReducer(state, action);
       const payload = getLastDeletePayload();
 
       expect(payload!.projectContext).toBeUndefined();

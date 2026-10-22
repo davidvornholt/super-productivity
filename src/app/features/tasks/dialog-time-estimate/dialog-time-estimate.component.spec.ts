@@ -1,8 +1,9 @@
 import { TestBed } from '@angular/core/testing';
 import { MAT_DIALOG_DATA, MatDialog, MatDialogRef } from '@angular/material/dialog';
-import { Subject } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { DEFAULT_TASK, Task } from '../task.model';
 import { TaskService } from '../task.service';
+import { TaskTimeSyncService } from '../task-time-sync.service';
 import { DateTimeFormatService } from '../../../core/date-time-format/date-time-format.service';
 import { DialogTimeEstimateComponent } from './dialog-time-estimate.component';
 
@@ -35,7 +36,8 @@ describe('DialogTimeEstimateComponent closing (#10823)', () => {
       backdropClick: () => backdropClick$,
       keydownEvents: () => keydown$,
     };
-    taskService = jasmine.createSpyObj('TaskService', ['update']);
+    taskService = jasmine.createSpyObj('TaskService', ['update', 'getByIdOnce$']);
+    taskService.getByIdOnce$.and.returnValue(of(task));
 
     await TestBed.configureTestingModule({
       imports: [DialogTimeEstimateComponent],
@@ -44,6 +46,7 @@ describe('DialogTimeEstimateComponent closing (#10823)', () => {
         { provide: MAT_DIALOG_DATA, useValue: { task } },
         { provide: MatDialog, useValue: {} },
         { provide: TaskService, useValue: taskService },
+        { provide: TaskTimeSyncService, useValue: { flushOne: jasmine.createSpy() } },
         { provide: DateTimeFormatService, useValue: { currentLocale: () => 'en' } },
       ],
     })
@@ -59,7 +62,6 @@ describe('DialogTimeEstimateComponent closing (#10823)', () => {
 
     expect(taskService.update).toHaveBeenCalledWith('task-1', {
       timeEstimate: 120000,
-      timeSpentOnDay: { [OTHER_DAY]: 1000 },
     });
     expect(dialogRef.close).toHaveBeenCalledTimes(1);
   });
@@ -82,6 +84,17 @@ describe('DialogTimeEstimateComponent closing (#10823)', () => {
 
     expect(taskService.update).not.toHaveBeenCalled();
     expect(dialogRef.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes without updating if the task disappeared while the dialog was open', () => {
+    const cmp = createComponent();
+    cmp.taskCopy.timeEstimate = 120000;
+    taskService.getByIdOnce$.and.returnValue(of<Task>(undefined!));
+
+    cmp.submit();
+
+    expect(taskService.update).not.toHaveBeenCalled();
+    expect(dialogRef.close).toHaveBeenCalledOnceWith();
   });
 
   it('discards changes on Escape', () => {

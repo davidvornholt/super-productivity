@@ -248,6 +248,8 @@ export class WorklogService {
     workContext: WorkContext,
   ): Promise<{ worklog: Worklog; totalTimeSpent: number }> {
     const archive = (await this._taskArchiveService.load()) || createEmptyEntity();
+    // Worklog/export is a snapshot: materialize desktop ticks before reading it.
+    this._taskService.flushAccumulatedTimeSpent();
     const taskState =
       (await this._taskService.taskFeatureState$.pipe(first()).toPromise()) ||
       createEmptyEntity();

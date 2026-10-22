@@ -310,8 +310,13 @@ const SHARED_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> 
     _hasWarnedAboutMissingLocks: 'a log-only warn-once flag',
   },
   TaskTimeSyncService: {
+    _taskEntities: STORE_SIGNAL,
     _accumulator:
       'filled only by TaskService ticks; the track intent dispatches the flush itself',
+    _isBufferingTicks: CONSTANT,
+    _taskTimeBuffer: STORE_SIGNAL,
+    _lastTickKey:
+      'set only by TaskService ticks; the track intent dispatches addTimeSpent itself',
   },
   LegacyPfDbService: { _tabId: 'the identity of the one browser tab' },
   BackupService: {

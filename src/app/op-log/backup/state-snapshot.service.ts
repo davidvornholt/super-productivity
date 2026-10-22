@@ -16,12 +16,22 @@ import { selectProjectFeatureState } from '../../features/project/store/project.
 import { selectSimpleCounterFeatureState } from '../../features/simple-counter/store/simple-counter.reducer';
 import { selectTagFeatureState } from '../../features/tag/store/tag.reducer';
 import { selectTaskFeatureState } from '../../features/tasks/store/task.selectors';
+import { selectTaskTimeBuffer } from '../../features/tasks/store/task-time-buffer.selectors';
+import { addTimeSpentForBuffer } from '../../features/tasks/store/task-time-buffer.reducer';
+import { taskReducer } from '../../features/tasks/store/task.reducer';
+import { TaskState } from '../../features/tasks/task.model';
 import { selectTaskRepeatCfgFeatureState } from '../../features/task-repeat-cfg/store/task-repeat-cfg.selectors';
 import { selectSectionFeatureState } from '../../features/section/store/section.selectors';
 import { selectTimeTrackingState } from '../../features/time-tracking/store/time-tracking.selectors';
 import { environment } from '../../../environments/environment';
-import { ArchiveModel } from '../../features/time-tracking/time-tracking.model';
-import { initialTimeTrackingState } from '../../features/time-tracking/store/time-tracking.reducer';
+import {
+  ArchiveModel,
+  TimeTrackingState,
+} from '../../features/time-tracking/time-tracking.model';
+import {
+  initialTimeTrackingState,
+  timeTrackingReducer,
+} from '../../features/time-tracking/store/time-tracking.reducer';
 import { ArchiveDbAdapter } from '../../core/persistence/archive-db-adapter.service';
 import { TaskTimeSyncService } from '../../features/tasks/task-time-sync.service';
 import { OperationCaptureService } from '../capture/operation-capture.service';
@@ -197,6 +207,24 @@ export class StateSnapshotService {
         .pipe(first())
         .subscribe((v) => (result[key] = v));
     }
+    // Desktop keeps tick time out of the task until its minutes change
+    // (TaskTimeBuffer). Snapshots hold the task time and work-context stamps as
+    // if every tick had been stored, which the sync batch and its projection
+    // below assume. This is the pass taskTimeBufferMetaReducer makes.
+    this._store
+      .select(selectTaskTimeBuffer)
+      .pipe(first())
+      .subscribe((buffer) => {
+        const task = buffer && (result.task as TaskState).entities[buffer.taskId];
+        if (buffer && task) {
+          const addTime = addTimeSpentForBuffer(task, buffer);
+          result.task = taskReducer(result.task as TaskState, addTime);
+          result.timeTracking = timeTrackingReducer(
+            result.timeTracking as TimeTrackingState,
+            addTime,
+          );
+        }
+      });
 
     return this._normalizeNgRxData(result);
   }

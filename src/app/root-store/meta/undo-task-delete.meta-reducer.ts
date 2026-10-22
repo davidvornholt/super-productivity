@@ -168,6 +168,18 @@ const captureTaskDeletePayload = (
   state: RootState,
   task: TaskWithSubTasks,
 ): RestoreDeletedTaskPayload => {
+  const taskEntities = state[TASK_FEATURE_NAME].entities;
+  const storedTask = taskEntities[task.id];
+  if (storedTask) {
+    // The outer time-buffer meta-reducer has already flushed into state, but
+    // the action still carries the caller's older task (and possibly children).
+    task = {
+      ...storedTask,
+      subTasks: storedTask.subTaskIds
+        .map((id) => taskEntities[id])
+        .filter((subTask): subTask is Task => !!subTask),
+    };
+  }
   const deletedTaskEntities = createDeletedTaskEntities(task);
   const allDeletedTasks = [task, ...(task.subTasks || [])];
   const tagTaskIdMap = buildTagTaskIdMap(state, allDeletedTasks);
