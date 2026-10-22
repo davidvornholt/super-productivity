@@ -57,7 +57,6 @@ const ALLOWED_TASK_FIELDS = new Set<string>([
   'notes',
   'isDone',
   'timeEstimate',
-  'timeSpent',
   'projectId',
   'tagIds',
   'dueDay',
@@ -75,6 +74,13 @@ const ALLOWED_TASK_FIELDS = new Set<string>([
  * via `POST /tasks` with `parentId` — see `_handleCreateTask`.
  */
 const REJECTED_TASK_FIELDS = ['parentId', 'subTaskIds'] as const;
+
+/**
+ * `timeSpent` is the sum of `timeSpentOnDay` and is recalculated from it, so a
+ * total written on its own wouldn't last. Time is logged per day instead.
+ */
+const TIME_SPENT_ERROR =
+  'timeSpent cannot be set directly — add time to a day with POST /tasks/:id/time or replace it with PUT /tasks/:id/time';
 
 /**
  * Fields a subtask inherits from its parent at the reducer (`addSubTask`
@@ -107,7 +113,6 @@ interface WritableTaskFields {
   notes?: string;
   isDone?: boolean;
   timeEstimate?: number;
-  timeSpent?: number;
   projectId?: string;
   tagIds?: string[];
   dueDay?: string | null;
@@ -685,6 +690,10 @@ export class LocalRestApiHandlerService {
       );
     }
 
+    if (hasOwn(body, 'timeSpent')) {
+      return createErrorResponse(requestId, 400, 'UNSUPPORTED_FIELD', TIME_SPENT_ERROR);
+    }
+
     const shortSyntaxFlag = readIsIgnoreShortSyntax(body);
     if (!shortSyntaxFlag.ok) {
       return createErrorResponse(
@@ -866,6 +875,14 @@ export class LocalRestApiHandlerService {
             400,
             'UNSUPPORTED_FIELD',
             `${rejected} cannot be set via PATCH — re-parenting is not supported by this API`,
+          );
+        }
+        if (hasOwn(body, 'timeSpent')) {
+          return createErrorResponse(
+            requestId,
+            400,
+            'UNSUPPORTED_FIELD',
+            TIME_SPENT_ERROR,
           );
         }
 
