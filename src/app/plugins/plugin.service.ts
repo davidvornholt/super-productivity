@@ -83,6 +83,7 @@ export class PluginService implements OnDestroy {
   private readonly _snackService = inject(SnackService);
 
   private _isInitialized = false;
+  private _initializationPromise?: Promise<void>;
   private _loadedPlugins: PluginInstance[] = [];
   private _pluginPaths: Map<string, string> = new Map(); // Store plugin ID -> path mapping
   private _pluginIndexHtml: Map<string, string> = new Map(); // Store plugin ID -> index.html content
@@ -111,22 +112,21 @@ export class PluginService implements OnDestroy {
       return;
     }
 
-    PluginLog.log('Initializing plugin system...');
-
-    try {
-      // Only load manifests, not the actual plugin code
-      await this._discoverBuiltInPlugins();
-      await this._discoverUploadedPlugins();
-
-      // Load all enabled plugins on startup
-      await this._loadEnabledPlugins();
-
-      this._isInitialized = true;
-      PluginLog.log('Plugin system initialized successfully');
-    } catch (error) {
-      PluginLog.err('Failed to initialize plugin system:', error);
-      throw error;
-    }
+    // Startup and route callers share discovery and activation until completion.
+    return (this._initializationPromise ??= (async () => {
+      PluginLog.log('Initializing plugin system...');
+      try {
+        await this._discoverBuiltInPlugins();
+        await this._discoverUploadedPlugins();
+        await this._loadEnabledPlugins();
+        this._isInitialized = true;
+        PluginLog.log('Plugin system initialized successfully');
+      } catch (error) {
+        this._initializationPromise = undefined;
+        PluginLog.err('Failed to initialize plugin system:', error);
+        throw error;
+      }
+    })());
   }
 
   private async _discoverBuiltInPlugins(): Promise<void> {
