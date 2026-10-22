@@ -91,6 +91,7 @@ import { PlannerActions } from '../../planner/store/planner.actions';
 import { DateService } from '../../../core/date/date.service';
 import { MenuTreeService } from '../../menu-tree/menu-tree.service';
 import { SelectOptionRowComponent } from '../../../ui/select-option-row/select-option-row.component';
+import { toPersistableRemindOption } from '../../planner/dialog-schedule-task/task-reminder-options.const';
 
 export interface TaskAddEvent {
   taskId: string;
@@ -536,6 +537,10 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
         taskData.timeSpentOnDay = state.spent;
       }
 
+      if (state.priority) {
+        taskData.priority = state.priority;
+      }
+
       if (state.deadlineDate) {
         if (state.deadlineTime && isValidSplitTime(state.deadlineTime)) {
           const deadlineDateObj = dateStrToUtcDate(state.deadlineDate);
@@ -638,7 +643,10 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
       if (state.repeat) {
         const repeat = state.repeat;
         if (repeat.type === 'DIALOG') {
-          this._openRepeatDialogForTask(taskId, resolvedRemindOption);
+          this._openRepeatDialogForTask(
+            taskId,
+            toPersistableRemindOption(resolvedRemindOption),
+          );
         } else {
           const referenceDate = dateStrToUtcDate(startDay);
           // An interval ("@every 2 days") has no preset to expand — it maps to a
@@ -660,10 +668,16 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
             ...repeatUpdates,
             title,
             notes: taskData.notes,
+            // Later occurrences take their priority from the config, so a
+            // "p1 @daily" must land here too, not only on the first instance
+            priority: taskData.priority,
             tagIds: taskData.tagIds ?? [],
             defaultEstimate: state.estimate || 0,
             startTime: state.time || undefined,
-            remindAt: state.time ? resolvedRemindOption : undefined,
+            // the schedule pick offers day/week lead times, a repeat cfg must not persist them
+            remindAt: state.time
+              ? toPersistableRemindOption(resolvedRemindOption)
+              : undefined,
           };
           // Seed the skipOverdue default from the chosen schedule, same as the
           // repeat dialog (there is no advanced toggle in the inline add-bar).

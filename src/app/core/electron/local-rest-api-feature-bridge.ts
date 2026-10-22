@@ -31,6 +31,12 @@ export interface LocalRestApiFeatureBridge {
    * tick time back until the task's minutes change.
    */
   currentTask(): Promise<{ id: string } | null>;
+
+  /**
+   * Moves a top-level task to another project the way the UI does, so a
+   * recurring task's repeat config and instances follow it, without asking.
+   */
+  moveTaskToProject(taskId: string, projectId: string): Promise<void>;
 }
 
 export const LOCAL_REST_API_FEATURE_BRIDGE =

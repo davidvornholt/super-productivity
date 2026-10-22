@@ -17,6 +17,7 @@ import {
   selectEnabledIssueProviders,
 } from '../../issue/store/issue-provider.selectors';
 import { HiddenCalendarProvidersService } from '../../calendar-integration/hidden-calendar-providers.service';
+import { selectUndoneDeadlineTasksByDay } from '../../planner/store/planner.selectors';
 import {
   getIssueProviderTooltip,
   sanitizeIcalUrlForDisplay,
@@ -355,6 +356,11 @@ export class ScheduleComponent {
     const days = this.scheduleDays();
     return mapScheduleDaysToScheduleEvents(days, FH);
   });
+
+  deadlineTasksByDay = toSignal(
+    this._store.pipe(select(selectUndoneDeadlineTasksByDay)),
+    { initialValue: {} },
+  );
 
   private _workStartEndHours = toSignal(
     this._store.pipe(select(selectTimelineWorkStartEndHours)),

@@ -22,6 +22,8 @@ import { ScheduleDay } from '../schedule.model';
 import { CalendarEventActionsService } from '../../calendar-integration/calendar-event-actions.service';
 import { registerLocaleData } from '@angular/common';
 import localeSv from '@angular/common/locales/sv';
+import { selectUndoneDeadlineTasksByDay } from '../../planner/store/planner.selectors';
+import { DEFAULT_TASK } from '../../tasks/task.model';
 import { DateService } from '../../../core/date/date.service';
 import { LS } from '../../../core/persistence/storage-keys.const';
 
@@ -139,9 +141,17 @@ describe('ScheduleComponent', () => {
       ],
     }).compileComponents();
 
+    const store = TestBed.inject(MockStore);
+    store.overrideSelector(selectUndoneDeadlineTasksByDay, {});
+
     fixture = TestBed.createComponent(ScheduleComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    fixture.destroy();
+    TestBed.inject(MockStore).resetSelectors();
   });
 
   describe('headerTitle computed', () => {
@@ -1286,12 +1296,6 @@ describe('ScheduleComponent', () => {
       hidden.setHidden([]);
     });
 
-    // overrideSelector mutates the selector itself, so always reset to avoid
-    // leaking provider lists into unrelated tests later in the file.
-    afterEach(() => {
-      TestBed.inject(MockStore).resetSelectors();
-    });
-
     it('should be false when no providers are enabled', () => {
       const store = TestBed.inject(MockStore);
       store.overrideSelector(selectCalendarProviders, []);
@@ -1648,6 +1652,33 @@ describe('ScheduleComponent', () => {
       expect(el.querySelector('schedule-week')).toBeTruthy();
       expect(el.querySelector('schedule-month')).toBeFalsy();
     });
+
+    it('passes deadline tasks to the paged day view badge', fakeAsync(() => {
+      const store = TestBed.inject(MockStore);
+      store.overrideSelector(selectUndoneDeadlineTasksByDay, {
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        '2026-01-20': [
+          {
+            ...DEFAULT_TASK,
+            id: 'task-1',
+            projectId: 'project-1',
+            title: 'Day-view deadline',
+            deadlineDay: '2026-01-20',
+          },
+        ],
+      });
+      store.refreshState();
+      mockScheduleService.getDaysToShow.and.returnValue(['2026-01-20']);
+      mockLayoutService.selectedTimeView.set('day');
+
+      fixture.detectChanges();
+      tick();
+      fixture.detectChanges();
+
+      const el: HTMLElement = fixture.nativeElement;
+      expect(el.querySelector('schedule-week .deadline-badge')).toBeTruthy();
+      expect(el.querySelector('schedule-week planner-deadline-task')).toBeFalsy();
+    }));
 
     it('has a day-view toggle button that selects day mode', () => {
       const el: HTMLElement = fixture.nativeElement;

@@ -8,6 +8,7 @@ import { IssueProviderKey } from '../issue/issue.model';
 import { addSubTask } from './store/task.actions';
 import { selectCurrentTaskWithBufferedTime } from './store/task-time-buffer.selectors';
 import { Task } from './task.model';
+import { TaskMoveToProjectService } from './task-move-to-project.service';
 import { TaskService } from './task.service';
 import { TaskTimeSyncService } from './task-time-sync.service';
 
@@ -16,6 +17,7 @@ import { TaskTimeSyncService } from './task-time-sync.service';
 export class LocalRestApiFeatureBridgeService implements LocalRestApiFeatureBridge {
   private readonly _issueService = inject(IssueService);
   private readonly _taskService = inject(TaskService);
+  private readonly _taskMoveToProjectService = inject(TaskMoveToProjectService);
   private readonly _store = inject(Store);
   private readonly _taskTimeSync = inject(TaskTimeSyncService);
 
@@ -51,5 +53,14 @@ export class LocalRestApiFeatureBridgeService implements LocalRestApiFeatureBrid
 
   currentTask(): Promise<Task | null> {
     return firstValueFrom(this._store.select(selectCurrentTaskWithBufferedTime));
+  }
+
+  async moveTaskToProject(taskId: string, projectId: string): Promise<void> {
+    const task = await firstValueFrom(this._taskService.getByIdWithSubTaskData$(taskId));
+    if (task) {
+      await this._taskMoveToProjectService.moveToProject(task, projectId, {
+        isSkipConfirm: true,
+      });
+    }
   }
 }

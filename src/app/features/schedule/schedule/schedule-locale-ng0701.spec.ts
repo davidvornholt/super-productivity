@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { formatDate } from '@angular/common';
 import { signal } from '@angular/core';
 import { of } from 'rxjs';
-import { provideMockStore } from '@ngrx/store/testing';
+import { MockStore, provideMockStore } from '@ngrx/store/testing';
 import { TranslateModule } from '@ngx-translate/core';
 import { DateAdapter } from '@angular/material/core';
 import { MatDialog } from '@angular/material/dialog';
@@ -16,6 +16,7 @@ import { GlobalTrackingIntervalService } from '../../../core/global-tracking-int
 import { GlobalConfigService } from '../../config/global-config.service';
 import { DateTimeLocales } from '../../../core/locale.constants';
 import { safeFormatDate } from '../../../util/safe-format-date';
+import { selectUndoneDeadlineTasksByDay } from '../../planner/store/planner.selectors';
 
 /**
  * Regression guard for issue #7383 (NG0701 on /schedule).
@@ -106,6 +107,7 @@ describe('issue #7383 — NG0701 race on /schedule', () => {
         providers: [
           provideMockStore({
             initialState: { issueProvider: { ids: [], entities: {} } },
+            selectors: [{ selector: selectUndoneDeadlineTasksByDay, value: {} }],
           }),
           { provide: TaskService, useValue: mockTaskService },
           { provide: LayoutService, useValue: mockLayoutService },
@@ -144,6 +146,11 @@ describe('issue #7383 — NG0701 race on /schedule', () => {
 
       fixture = TestBed.createComponent(ScheduleComponent);
       component = fixture.componentInstance;
+    });
+
+    afterEach(() => {
+      fixture.destroy();
+      TestBed.inject(MockStore).resetSelectors();
     });
 
     it('does NOT throw when zh-cn locale data is not yet registered (regression guard for #7383)', () => {

@@ -550,6 +550,24 @@ describe('AddTaskBarComponent', () => {
       expect(secondTaskData.tagIds).toEqual(['tag-1']);
     });
 
+    it('should pass a syntax-parsed priority to the new task and reset it after', async () => {
+      mockTaskService.add.and.returnValue('task-1');
+
+      component.stateService.updateInputTxt('Fix login bug p1');
+      component.stateService.updateCleanText('Fix login bug');
+      component.stateService.updatePriority(3);
+      await component.addTask();
+
+      const [title, , taskData] = mockTaskService.add.calls.mostRecent().args as [
+        string,
+        boolean,
+        Partial<TaskCopy>,
+      ];
+      expect(title).toBe('Fix login bug');
+      expect(taskData.priority).toBe(3);
+      expect(component.stateService.state().priority).toBeNull();
+    });
+
     // #5461: a repeat-preset task with no explicit date must default to the
     // logical "today" (offset-aware), not the calendar date. These assert the
     // component reads DateService.todayStr() — a regression to getDbDateStr()
@@ -674,6 +692,31 @@ describe('AddTaskBarComponent', () => {
       expect(addRepeatCfgSpy.calls.mostRecent().args[2].startDate).toBe('2026-03-30');
     });
 
+    // The schedule pick offers day/week lead times; a repeat config persists the
+    // option id, which released clients before v19.2.0 cannot convert.
+    it('should not persist a long lead time into a picked repeat config', async () => {
+      mockTaskService.add.and.returnValue('task-1');
+      const addRepeatCfgSpy = spyOn(
+        TestBed.inject(TaskRepeatCfgService),
+        'addTaskRepeatCfgToTask',
+      );
+
+      component.stateService.updateInputTxt('Standup');
+      component.stateService.updateCleanText('Standup');
+      component.stateService.updateDate('2026-03-30', '09:30');
+      component.stateService.updateRemindOption(TaskReminderOptionId.d1);
+      component.stateService.updateRepeatSetting({
+        type: 'PRESET',
+        quickSetting: 'DAILY',
+      });
+
+      await component.addTask();
+
+      expect(addRepeatCfgSpy.calls.mostRecent().args[2].remindAt).toBe(
+        TaskReminderOptionId.h1,
+      );
+    });
+
     // Nothing rolls the fallback to today on the way in — a recurrence with no
     // date never passes a date through the parser — so the config would keep a
     // weekend start date the user cannot see while the task itself is created
@@ -765,6 +808,26 @@ describe('AddTaskBarComponent', () => {
 
       const repeatCfg = addRepeatCfgSpy.calls.mostRecent().args[2];
       expect(repeatCfg.notes).toBe('Join from the meeting room');
+    });
+
+    it('should copy a syntax-parsed priority to an inline repeat config', async () => {
+      mockTaskService.add.and.returnValue('task-1');
+      const addRepeatCfgSpy = spyOn(
+        TestBed.inject(TaskRepeatCfgService),
+        'addTaskRepeatCfgToTask',
+      );
+
+      component.stateService.updateInputTxt('Daily standup p1');
+      component.stateService.updateCleanText('Daily standup');
+      component.stateService.updatePriority(3);
+      component.stateService.updateRepeatSetting({
+        type: 'PRESET',
+        quickSetting: 'DAILY',
+      });
+
+      await component.addTask();
+
+      expect(addRepeatCfgSpy.calls.mostRecent().args[2].priority).toBe(3);
     });
 
     it('seeds skipOverdue ON for an inline Daily repeat (#8644)', async () => {
