@@ -5,7 +5,6 @@ import {
   parseMarkdownTasks,
   convertToMarkdownNotes,
   parseMarkdownTasksWithStructure,
-  ParsedMarkdownTask,
 } from '../../util/parse-markdown-tasks';
 import { DialogConfirmComponent } from '../../ui/dialog-confirm/dialog-confirm.component';
 import { T } from '../../t.const';
@@ -101,10 +100,10 @@ export class MarkdownPasteService {
         }
 
         // Create parent tasks with sub-tasks
-        const mainTasks = this._getParentTasksInInsertionOrder(
-          structure.mainTasks,
-          parentTaskPlacement.isAddToBottom,
-        );
+        // Prepending reverses insertion order; preserve the clipboard's order.
+        const mainTasks = parentTaskPlacement.isAddToBottom
+          ? structure.mainTasks
+          : [...structure.mainTasks].reverse();
         for (const mainTask of mainTasks) {
           const parentTaskId = this._taskService.add(
             mainTask.title,
@@ -113,7 +112,7 @@ export class MarkdownPasteService {
               isDone: mainTask.isCompleted,
               notes: mainTask.notes,
             },
-            parentTaskPlacement.isAddToBottom || mainTask.isCompleted,
+            parentTaskPlacement.isAddToBottom,
           );
 
           // Create sub-tasks if any
@@ -182,10 +181,9 @@ export class MarkdownPasteService {
       }
     } else {
       // Create as parent tasks (simple list without nesting).
-      const mainTasks = this._getParentTasksInInsertionOrder(
-        parsedTasks,
-        parentTaskPlacement.isAddToBottom,
-      );
+      const mainTasks = parentTaskPlacement.isAddToBottom
+        ? parsedTasks
+        : [...parsedTasks].reverse();
       for (const parsedTask of mainTasks) {
         this._taskService.add(
           parsedTask.title,
@@ -194,7 +192,7 @@ export class MarkdownPasteService {
             isDone: parsedTask.isCompleted,
             notes: parsedTask.notes,
           },
-          parentTaskPlacement.isAddToBottom || parsedTask.isCompleted,
+          parentTaskPlacement.isAddToBottom,
         );
       }
     }
@@ -208,23 +206,6 @@ export class MarkdownPasteService {
 
     const parsedTasks = parseMarkdownTasks(text);
     return parsedTasks !== null && parsedTasks.length > 0;
-  }
-
-  private _getParentTasksInInsertionOrder(
-    tasks: ParsedMarkdownTask[],
-    isAddToBottom: boolean,
-  ): ParsedMarkdownTask[] {
-    if (isAddToBottom) {
-      return tasks;
-    }
-    // Today Done falls back to creation order for imports without doneOn;
-    // project/tag Done lists fall back to their explicit task order. Keep
-    // checked parents in clipboard order and append them in both cases.
-    // Only unfinished parents need reverse insertion for Top placement.
-    return [
-      ...tasks.filter((task) => !task.isCompleted).reverse(),
-      ...tasks.filter((task) => task.isCompleted),
-    ];
   }
 
   // isEnableDue gates both due-date and time estimation parsing,

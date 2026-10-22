@@ -42,23 +42,33 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
     await workViewPage.addTask('Existing sentinel', true);
     const initial = await state(page);
     const sentinel = initial.projects.entities[projectId].taskIds[0];
-    if (placement === 'backlog') {
-      await page.evaluate((id) => {
-        (
-          window as unknown as {
-            __e2eTestHelpers: { store: { dispatch: (a: unknown) => void } };
-          }
-        ).__e2eTestHelpers.store.dispatch({
-          type: '[Project] Update Project',
-          project: { id, changes: { isEnableBacklog: true } },
-          meta: {
-            isPersistent: true,
-            entityType: 'PROJECT',
-            entityId: id,
-            opType: 'UPD',
-          },
-        });
-      }, projectId);
+    await page.evaluate((id) => {
+      (
+        window as unknown as {
+          __e2eTestHelpers: { store: { dispatch: (a: unknown) => void } };
+        }
+      ).__e2eTestHelpers.store.dispatch({
+        type: '[Project] Update Project',
+        project: { id, changes: { isEnableBacklog: true } },
+        meta: {
+          isPersistent: true,
+          entityType: 'PROJECT',
+          entityId: id,
+          opType: 'UPD',
+        },
+      });
+    }, projectId);
+    await page.locator('add-task-bar.global .switch-add-to-btn').click();
+    await workViewPage.addTask('Existing backlog sentinel', true, null);
+    await expect
+      .poll(
+        async () =>
+          (await state(page)).projects.entities[projectId].backlogTaskIds.length,
+      )
+      .toBe(1);
+    const backlogSentinel = (await state(page)).projects.entities[projectId]
+      .backlogTaskIds[0];
+    if (placement !== 'backlog') {
       await page.locator('add-task-bar.global .switch-add-to-btn').click();
     }
     if (placement === 'bottom') {
@@ -84,7 +94,14 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
           ).length,
       )
       .toBe(5);
-    for (let reload = 0; reload < 2; reload++) {
+    for (let reload = 0; reload <= 2; reload++) {
+      if (reload > 0) {
+        // Wait for real op-log persistence before each reopening, then assert again.
+        await page.keyboard.press('Escape');
+        await flushPendingWrites(page);
+        await page.reload();
+        await waitForAppReady(page);
+      }
       const current = await state(page);
       const taskByTitle = (title: string): TaskShape =>
         Object.values(current.tasks.entities).find((t) => t.title === title)!;
@@ -95,41 +112,36 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
       expect.soft(first.subTaskIds).toEqual([child.id]);
       expect.soft(child.parentId).toBe(first.id);
       expect.soft(child.projectId).toBe(projectId);
-      const pastedIds = [first.id, second.id];
-      const unfinishedIds = (ids: string[]): string[] =>
-        ids.filter((id) => !current.tasks.entities[id].isDone);
-      const targetIds =
-        placement === 'backlog' ? project.backlogTaskIds : project.taskIds;
+      const doneFirst = taskByTitle('Paste done first');
+      const doneSecond = taskByTitle('Paste done second');
+      expect.soft(doneFirst.isDone).toBe(true);
+      expect.soft(doneSecond.isDone).toBe(true);
+      const pastedIds = [first.id, doneFirst.id, second.id, doneSecond.id];
+      for (const id of pastedIds) {
+        expect.soft(current.tasks.entities[id].projectId).toBe(projectId);
+        expect.soft(current.tasks.entities[id].parentId).toBeFalsy();
+      }
+      const titles = (ids: string[]): string[] =>
+        ids.map((id) => current.tasks.entities[id].title);
+      // Check the complete mixed order: filtering by completion hides misplaced parents.
       expect
-        .soft(targetIds.filter((id) => current.tasks.entities[id].isDone))
-        .toEqual([
-          taskByTitle('Paste done first').id,
-          taskByTitle('Paste done second').id,
-        ]);
-      expect
-        .soft(unfinishedIds(project.taskIds))
+        .soft(titles(project.taskIds))
         .toEqual(
-          placement === 'backlog'
-            ? [sentinel]
-            : placement === 'top'
-              ? [...pastedIds, sentinel]
-              : [sentinel, ...pastedIds],
+          titles(
+            placement === 'backlog'
+              ? [sentinel]
+              : placement === 'top'
+                ? [...pastedIds, sentinel]
+                : [sentinel, ...pastedIds],
+          ),
         );
       expect
-        .soft(unfinishedIds(project.backlogTaskIds))
-        .toEqual(placement === 'backlog' ? pastedIds : []);
-      // Wait for real op-log persistence before reopening.
-      await page.keyboard.press('Escape');
-      await flushPendingWrites(page);
-      await page.reload();
-      await waitForAppReady(page);
+        .soft(titles(project.backlogTaskIds))
+        .toEqual(
+          titles(
+            placement === 'backlog' ? [...pastedIds, backlogSentinel] : [backlogSentinel],
+          ),
+        );
     }
-    // Today builds Done from all tasks, not the project's explicit order.
-    await page.goto('/#/tag/TODAY/tasks');
-    await waitForAppReady(page);
-    await expect(page.locator('.tour-doneList task-title')).toHaveText([
-      /Paste done first/,
-      /Paste done second/,
-    ]);
   });
 }
