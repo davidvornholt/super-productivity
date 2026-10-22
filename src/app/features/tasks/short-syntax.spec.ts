@@ -4211,7 +4211,18 @@ describe('shortSyntax localized dates', () => {
         ['fi', 'Task', '@3.lokakuuta'],
       ]) {
         for (const isDayFirst of [true, false]) {
-          for (const suffix of ['', ' vorbereiten']) {
+          for (const suffix of [
+            '',
+            ' vorbereiten',
+            ', vorbereiten',
+            '; vorbereiten',
+            ': vorbereiten',
+            '? vorbereiten',
+            ',vorbereiten',
+            ';vorbereiten',
+            ':vorbereiten',
+            '?vorbereiten',
+          ]) {
             const title = `${prefix}${expression}${suffix}`;
             const context = `${title}, isDayFirst=${isDayFirst}`;
             const r = await parseIn({ language, isDayFirst }, title);

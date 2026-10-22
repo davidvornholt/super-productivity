@@ -847,8 +847,9 @@ const parseShortSyntaxDate = async (
       if (EMAIL_DOMAIN_START_REG_EX.test(m[0])) {
         // Prefer established day-dot-month syntax ("Termin@3.okt.") only when
         // chrono recognizes the entire token, never a fragment of "3.okt.de"
-        // or an arbitrary numeric domain such as "3.com".
-        const token = m[0].match(/^@\d{1,2}\.\S+/)?.[0];
+        // or an arbitrary numeric domain such as "3.com". Prose punctuation
+        // ends the token; chrono can leave it outside the consumed date.
+        const token = m[0].match(/^@\d{1,2}\.[^\s,;:?]+/)?.[0];
         if (!token) {
           continue;
         }
