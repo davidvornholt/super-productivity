@@ -2,6 +2,10 @@ import { expect, test } from '../../fixtures/test.fixture';
 import { flushPendingWrites } from '../../utils/waits';
 import type { Page } from '@playwright/test';
 
+// The suite otherwise picks a DST-free zone. Construct dates in the browser
+// below so the runner's timezone cannot change the Berlin fall-back scenario.
+test.use({ timezoneId: 'Europe/Berlin' });
+
 const readSchedule = async (
   page: Page,
   id: string,
@@ -63,14 +67,19 @@ for (const scenario of [
     page,
     workViewPage,
   }) => {
-    await page.clock.setSystemTime(new Date(`${scenario.start}T23:00:00`));
+    await page.clock.setSystemTime(
+      await page.evaluate((day) => new Date(`${day}T23:00:00`).getTime(), scenario.start),
+    );
     await page.reload();
     await workViewPage.waitForTaskList();
     await workViewPage.addTask('Synthetic night schedule');
 
     // Dispatch the actual config/scheduling actions through the running app's
     // store. Startup, effects, meta-reducers, persistence and replay are real.
-    const dueWithTime = new Date(`${scenario.next}T02:00:00`).getTime();
+    const dueWithTime = await page.evaluate(
+      (day) => new Date(`${day}T02:00:00`).getTime(),
+      scenario.next,
+    );
     const id = await page.evaluate(
       ({ due, offset }) => {
         type Task = { id: string; title: string };
@@ -127,7 +136,9 @@ for (const scenario of [
       .toEqual({ dueWithTime, dueDay: null });
     await flushPendingWrites(page);
 
-    await page.clock.setSystemTime(new Date(`${scenario.next}T09:00:00`));
+    await page.clock.setSystemTime(
+      await page.evaluate((day) => new Date(`${day}T09:00:00`).getTime(), scenario.next),
+    );
     if (scenario.reload) await page.reload();
     else await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await workViewPage.waitForTaskList();

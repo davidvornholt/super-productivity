@@ -9,6 +9,7 @@ import { TaskRepeatCfg } from '../task-repeat-cfg/task-repeat-cfg.model';
 import { TaskWithDueTime, TaskWithDueDay, TaskCopy } from '../tasks/task.model';
 import { TaskSharedActions } from '../../root-store/meta/task-shared.actions';
 import {
+  selectAllTasksWithDueTime,
   selectTasksDueForDay,
   selectTasksWithDueTimeForDay,
 } from '../tasks/store/task.selectors';
@@ -85,8 +86,7 @@ describe('AddTasksForTomorrowService', () => {
     created: Date.now(),
     isDone: false,
     attachments: [],
-    // eslint-disable-next-line no-mixed-operators
-    dueWithTime: today.getTime() + 1000 * 60 * 60 * 16, // 4 PM today
+    dueWithTime: new Date(today).setHours(16, 0, 0, 0), // 4 PM today
   } as TaskWithDueTime;
 
   const mockTaskWithDueDayToday: TaskWithDueDay = {
@@ -413,7 +413,7 @@ describe('AddTasksForTomorrowService', () => {
       taskRepeatCfgServiceMock.getAllUnprocessedRepeatableTasks$.and.returnValue(
         of([mockRepeatCfg, mockRepeatCfg2]),
       );
-      store.overrideSelector(selectTasksWithDueTimeForDay, []);
+      store.overrideSelector(selectAllTasksWithDueTime, []);
       store.overrideSelector(selectTasksDueForDay, []);
       // Empty planner day means no tasks to move to today
       store.overrideSelector(selectTasksForPlannerDay(getDbDateStr(today)), []);
@@ -430,7 +430,7 @@ describe('AddTasksForTomorrowService', () => {
 
     it('should add due tasks to today', async () => {
       taskRepeatCfgServiceMock.getAllUnprocessedRepeatableTasks$.and.returnValue(of([]));
-      store.overrideSelector(selectTasksWithDueTimeForDay, [mockTaskWithDueTimeToday]);
+      store.overrideSelector(selectAllTasksWithDueTime, [mockTaskWithDueTimeToday]);
       store.overrideSelector(selectTasksDueForDay, [mockTaskWithDueDayToday]);
       store.overrideSelector(selectTasksForPlannerDay(getDbDateStr(today)), [
         mockTaskWithDueTimeToday,
@@ -470,7 +470,7 @@ describe('AddTasksForTomorrowService', () => {
       taskRepeatCfgServiceMock.getAllUnprocessedRepeatableTasks$.and.returnValue(
         of([overdueWeeklyTask]),
       );
-      store.overrideSelector(selectTasksWithDueTimeForDay, []);
+      store.overrideSelector(selectAllTasksWithDueTime, []);
       store.overrideSelector(selectTasksDueForDay, []);
       store.overrideSelector(selectTasksForPlannerDay(getDbDateStr(today)), []);
       store.overrideSelector(selectTodayTaskIds, []);
@@ -514,7 +514,7 @@ describe('AddTasksForTomorrowService', () => {
       taskRepeatCfgServiceMock.getAllUnprocessedRepeatableTasks$.and.returnValue(
         of([overdueDaily, overdueMonthly]),
       );
-      store.overrideSelector(selectTasksWithDueTimeForDay, []);
+      store.overrideSelector(selectAllTasksWithDueTime, []);
       store.overrideSelector(selectTasksDueForDay, []);
       store.overrideSelector(selectTasksForPlannerDay(getDbDateStr(today)), []);
       store.overrideSelector(selectTodayTaskIds, []);
@@ -539,7 +539,7 @@ describe('AddTasksForTomorrowService', () => {
       dateServiceSpy.getLogicalTodayDate.and.returnValue(logicalToday);
 
       taskRepeatCfgServiceMock.getAllUnprocessedRepeatableTasks$.and.returnValue(of([]));
-      store.overrideSelector(selectTasksWithDueTimeForDay, []);
+      store.overrideSelector(selectAllTasksWithDueTime, []);
       store.overrideSelector(selectTasksDueForDay, []);
       store.overrideSelector(selectTasksForPlannerDay(getDbDateStr(today)), []);
       store.overrideSelector(selectTodayTaskIds, []);
@@ -559,7 +559,7 @@ describe('AddTasksForTomorrowService', () => {
       taskRepeatCfgServiceMock.getAllUnprocessedRepeatableTasks$.and.returnValue(
         of(cfgs),
       );
-      store.overrideSelector(selectTasksWithDueTimeForDay, []);
+      store.overrideSelector(selectAllTasksWithDueTime, []);
       store.overrideSelector(selectTasksDueForDay, []);
       store.overrideSelector(selectTasksForPlannerDay(getDbDateStr(today)), []);
       store.overrideSelector(selectTodayTaskIds, []);

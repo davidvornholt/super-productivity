@@ -931,19 +931,6 @@ export const selectTasksWithDueTimeForDay = createSelector(
     ),
 );
 
-export const selectTasksWithDueTimeForRange = createSelector(
-  selectAllTasksInActiveProjects,
-  (tasks: Task[], props: { start: number; end: number }): TaskWithDueTime[] => {
-    return tasks.filter(
-      (task) =>
-        !!task &&
-        typeof task.dueWithTime === 'number' &&
-        task.dueWithTime >= props.start &&
-        task.dueWithTime <= props.end,
-    ) as TaskWithDueTime[];
-  },
-);
-
 export const selectAllTasksWithDueTime = createSelector(
   selectAllTasksInActiveProjects,
   (tasks: Task[]): TaskWithDueTime[] => {

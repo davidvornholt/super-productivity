@@ -7,6 +7,7 @@ import { combineLatest, firstValueFrom, Observable } from 'rxjs';
 import { Store } from '@ngrx/store';
 import { dateStrToUtcDate } from '../../util/date-str-to-utc-date';
 import {
+  selectAllTasksWithDueTime,
   selectTasksDueForDay,
   selectTasksWithDueTimeForDay,
 } from '../tasks/store/task.selectors';
@@ -18,6 +19,7 @@ import { TaskSharedActions } from '../../root-store/meta/task-shared.actions';
 import { selectTodayTaskIds } from '../work-context/store/work-context.selectors';
 import { selectTasksForPlannerDay } from '../planner/store/planner.selectors';
 import { TaskLog } from '../../core/log';
+import { isTodayWithOffset } from '../../util/is-today.util';
 
 @Injectable({
   providedIn: 'root',
@@ -180,9 +182,20 @@ export class AddTasksForTomorrowService {
     // Get tasks due for today
     const [dueWithTime, dueWithDay] = await firstValueFrom(
       combineLatest([
-        this._store.select(selectTasksWithDueTimeForDay, {
-          day: todayStr,
-        }),
+        // Config can change during the awaits above. Use the same captured
+        // day/offset for selection and dispatch, or planning can erase a time
+        // that only belonged to this day under the new offset.
+        this._store
+          .select(selectAllTasksWithDueTime)
+          .pipe(
+            map((tasks) =>
+              tasks.filter(
+                (task) =>
+                  !!task.dueWithTime &&
+                  isTodayWithOffset(task.dueWithTime, todayStr, startOfNextDayDiffMs),
+              ),
+            ),
+          ),
         this._store.select(selectTasksDueForDay, { day: getDbDateStr(todayDate) }),
       ]).pipe(first()),
     );
