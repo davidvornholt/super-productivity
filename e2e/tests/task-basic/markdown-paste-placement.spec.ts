@@ -6,6 +6,7 @@ interface TaskShape {
   id: string;
   title: string;
   parentId?: string;
+  isDone: boolean;
   projectId: string;
   subTaskIds: string[];
 }
@@ -68,7 +69,7 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
       const clipboardData = new DataTransfer();
       clipboardData.setData(
         'text/plain',
-        '- Paste first\n  - Paste child\n- Paste second',
+        '- Paste first\n  - Paste child\n- [x] Paste done first\n- Paste second\n- [x] Paste done second',
       );
       element.dispatchEvent(
         new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
@@ -82,7 +83,7 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
             t.title.startsWith('Paste '),
           ).length,
       )
-      .toBe(3);
+      .toBe(5);
     for (let reload = 0; reload < 2; reload++) {
       const current = await state(page);
       const taskByTitle = (title: string): TaskShape =>
@@ -95,8 +96,18 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
       expect.soft(child.parentId).toBe(first.id);
       expect.soft(child.projectId).toBe(projectId);
       const pastedIds = [first.id, second.id];
+      const unfinishedIds = (ids: string[]): string[] =>
+        ids.filter((id) => !current.tasks.entities[id].isDone);
+      const targetIds =
+        placement === 'backlog' ? project.backlogTaskIds : project.taskIds;
       expect
-        .soft(project.taskIds)
+        .soft(targetIds.filter((id) => current.tasks.entities[id].isDone))
+        .toEqual([
+          taskByTitle('Paste done first').id,
+          taskByTitle('Paste done second').id,
+        ]);
+      expect
+        .soft(unfinishedIds(project.taskIds))
         .toEqual(
           placement === 'backlog'
             ? [sentinel]
@@ -105,7 +116,7 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
               : [sentinel, ...pastedIds],
         );
       expect
-        .soft(project.backlogTaskIds)
+        .soft(unfinishedIds(project.backlogTaskIds))
         .toEqual(placement === 'backlog' ? pastedIds : []);
       // Wait for real op-log persistence before reopening.
       await page.keyboard.press('Escape');
@@ -113,5 +124,12 @@ for (const placement of ['top', 'bottom', 'backlog'] as const) {
       await page.reload();
       await waitForAppReady(page);
     }
+    // Today builds Done from all tasks, not the project's explicit order.
+    await page.goto('/#/tag/TODAY/tasks');
+    await waitForAppReady(page);
+    await expect(page.locator('.tour-doneList task-title')).toHaveText([
+      /Paste done first/,
+      /Paste done second/,
+    ]);
   });
 }
