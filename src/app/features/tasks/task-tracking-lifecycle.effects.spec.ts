@@ -145,6 +145,30 @@ describe('TaskTrackingLifecycleEffects', () => {
     currentTaskId.set('task');
     actions.next(setCurrentTask({ id: 'task' }));
     expect(pendingIds.has(TRACKING_BEFORE_CLOSE_ID)).toBeTrue();
+
+    // A second quit can arrive after cancelling/resuming but BEFORE the drain settles.
+    const drains: Array<() => void> = [];
+    writes.flushPendingWrites.and.callFake(
+      () => new Promise<void>((resolve) => drains.push(resolve)),
+    );
+    closing.next([...pendingIds]);
+    currentTaskId.set('task');
+    actions.next(setCurrentTask({ id: 'task' }));
+    closing.next([...pendingIds]);
+    expect(currentTaskId()).toBeNull();
+    expect(task.flushAccumulatedTimeSpent).toHaveBeenCalledTimes(4);
+    expect(writes.flushPendingWrites).toHaveBeenCalledTimes(4);
+    expect(close.setDone).toHaveBeenCalledTimes(2);
+    // The first drain may finish before the resumed task's new writes.
+    drains[0]();
+    flushMicrotasks();
+    expect(close.setDone).toHaveBeenCalledTimes(2);
+    expect(pendingIds.has(TRACKING_BEFORE_CLOSE_ID)).toBeTrue();
+    drains[1]();
+    flushMicrotasks();
+    expect(pendingIds.size).toBe(0);
+    expect(close.setDone).toHaveBeenCalledTimes(3);
+    expect(close.schedule).toHaveBeenCalledTimes(3);
   }));
 
   it('waits for all writes before acknowledging its own id alongside other handlers', fakeAsync(() => {
@@ -156,8 +180,8 @@ describe('TaskTrackingLifecycleEffects', () => {
     task.flushAccumulatedTimeSpent.and.callFake(() => order.push('flush'));
     closing.next(['SYNC_BEFORE_CLOSE', TRACKING_BEFORE_CLOSE_ID, 'FINISH_DAY']);
     closing.next([TRACKING_BEFORE_CLOSE_ID]);
-    expect(order).toEqual(['stop', 'flush']);
-    expect(writes.flushPendingWrites).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['stop', 'flush', 'stop', 'flush']);
+    expect(writes.flushPendingWrites).toHaveBeenCalledTimes(2);
     expect(close.setDone).not.toHaveBeenCalled();
     complete();
     flushMicrotasks();
@@ -185,6 +209,10 @@ describe('TaskTrackingLifecycleEffects', () => {
     setup(true);
     spyOn(Log, 'err');
     writes.flushPendingWrites.and.returnValue(new Promise<void>(() => undefined));
+    closing.next([TRACKING_BEFORE_CLOSE_ID]);
+    tick(4999);
+    expect(close.setDone).not.toHaveBeenCalled();
+    // A new quit gets its own bounded wait; cancelling the old wait must not ack.
     closing.next([TRACKING_BEFORE_CLOSE_ID]);
     tick(4999);
     expect(close.setDone).not.toHaveBeenCalled();

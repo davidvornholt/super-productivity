@@ -6,7 +6,7 @@ import {
   catchError,
   exhaustMap,
   filter,
-  finalize,
+  switchMap,
   take,
   tap,
   timeout,
@@ -87,7 +87,9 @@ export class TaskTrackingLifecycleEffects {
         ? defer(() => EMPTY)
         : this._close.onBeforeClose$.pipe(
             filter((ids) => ids.includes(TRACKING_BEFORE_CLOSE_ID)),
-            exhaustMap(() =>
+            // A retry after cancelling/resuming must stop and drain again.
+            // Only the latest quit may acknowledge, including on timeout.
+            switchMap(() =>
               defer(() => {
                 // Stop only on real quit, not hide/close-to-tray. This prevents
                 // new ticks while waiting for the write queue or another handler.
@@ -100,15 +102,17 @@ export class TaskTrackingLifecycleEffects {
                   Log.err('Could not flush tracked time before closing', error);
                   return EMPTY;
                 }),
-                finalize(() => {
-                  this._isCloseRegistered = false;
-                  this._close.setDone(TRACKING_BEFORE_CLOSE_ID);
-                  // A cancelled quit can resume tracking while writes drain.
-                  // Re-arm after setDone: main removes every matching id on ack.
-                  if (this._taskService.currentTaskId()) {
-                    this._close.schedule(TRACKING_BEFORE_CLOSE_ID);
-                    this._isCloseRegistered = true;
-                  }
+                tap({
+                  complete: () => {
+                    this._isCloseRegistered = false;
+                    this._close.setDone(TRACKING_BEFORE_CLOSE_ID);
+                    // A cancelled quit can resume tracking while writes drain.
+                    // Re-arm after setDone: main removes every matching id on ack.
+                    if (this._taskService.currentTaskId()) {
+                      this._close.schedule(TRACKING_BEFORE_CLOSE_ID);
+                      this._isCloseRegistered = true;
+                    }
+                  },
                 }),
               ),
             ),
