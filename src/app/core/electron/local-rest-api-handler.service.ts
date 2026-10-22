@@ -1022,10 +1022,8 @@ export class LocalRestApiHandlerService {
       if ('error' in parsed) {
         return createErrorResponse(requestId, 400, parsed.code, parsed.error);
       }
-      // Flush before reading: update() flushes too late for a copied day map.
-      if (method === 'PUT') {
-        this._featureBridge.flushTaskTime(taskId);
-      }
+      // Both the absolute edit and POST's daily limit need the complete day map.
+      this._featureBridge.flushTaskTime(taskId);
       const task = await this._getTaskById(taskId);
       if (!task) {
         return createErrorResponse(requestId, 404, 'TASK_NOT_FOUND', 'Task not found');
