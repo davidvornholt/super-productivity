@@ -313,6 +313,7 @@ export class TaskComponent implements OnDestroy, AfterViewInit {
       task.dueWithTime
         ? readClockUntilDue(
             this.globalTrackingIntervalService.clockTimestamp,
+            this.globalTrackingIntervalService.clockMinute,
             task.dueWithTime,
           )
         : 0,
