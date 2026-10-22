@@ -27,6 +27,7 @@ let backupFiles;
 // resolved path -> contents served by the mocked writeFileSync/readFileSync
 let storedFiles;
 let readPaths;
+let readFailure;
 // overridable per test; defaults to storing into storedFiles
 let writeFileSyncImpl;
 
@@ -64,9 +65,14 @@ const installMocks = () => {
         readdirSync: () => Array.from(backupFiles.keys()),
         statSync: (p) => ({ mtime: new Date(backupFiles.get(path.basename(p))) }),
         mkdirSync: (p) => existingPaths.add(p),
+        unlinkSync: (p) => {
+          backupFiles.delete(path.basename(p));
+          storedFiles.delete(path.resolve(p));
+        },
         writeFileSync: (...args) => writeFileSyncImpl(...args),
         readFileSync: (p) => {
           readPaths.push(p);
+          if (readFailure) throw readFailure;
           return storedFiles.get(path.resolve(p));
         },
       };
@@ -89,6 +95,7 @@ test.beforeEach(() => {
   backupFiles = new Map();
   storedFiles = new Map();
   readPaths = [];
+  readFailure = null;
   writeFileSyncImpl = (p, data) => {
     storedFiles.set(path.resolve(p), data);
     backupFiles.set(path.basename(p), Date.now());
@@ -251,4 +258,70 @@ test('BACKUP rejects with a path-free error when the write fails (#10022)', asyn
       return true;
     },
   );
+});
+
+test('unchanged snapshots keep the newest backup without another write', () => {
+  loadBackupModule().initBackupAdapter();
+  const backup = handleHandlers.get('BACKUP');
+  let writes = 0;
+  const write = writeFileSyncImpl;
+  writeFileSyncImpl = (...args) => {
+    writes++;
+    return write(...args);
+  };
+  const data = { task: { ids: ['synthetic'], entities: {} } };
+  backup({}, { data });
+  backup({}, { data });
+  assert.equal(writes, 1);
+});
+
+test('a changed snapshot is written even if an older backup matches it', () => {
+  loadBackupModule().initBackupAdapter();
+  existingPaths.add(BACKUP_DIR);
+  backupFiles.set('old.json', 1000);
+  backupFiles.set('new.json', 2000);
+  const data = { task: { ids: ['synthetic'], entities: {} } };
+  storedFiles.set(path.resolve(BACKUP_DIR, 'old.json'), JSON.stringify(data));
+  storedFiles.set(path.resolve(BACKUP_DIR, 'new.json'), '{}');
+  let writes = 0;
+  const write = writeFileSyncImpl;
+  writeFileSyncImpl = (...args) => {
+    writes++;
+    return write(...args);
+  };
+  handleHandlers.get('BACKUP')({}, { data });
+  assert.equal(writes, 1);
+});
+
+test('an unreadable newest backup does not suppress a new snapshot', () => {
+  loadBackupModule().initBackupAdapter();
+  existingPaths.add(BACKUP_DIR);
+  backupFiles.set('new.json', 2000);
+  readFailure = new Error('synthetic unreadable backup');
+  let writes = 0;
+  const write = writeFileSyncImpl;
+  writeFileSyncImpl = (...args) => {
+    writes++;
+    return write(...args);
+  };
+  handleHandlers.get('BACKUP')({}, { data: {} });
+  assert.equal(writes, 1);
+});
+
+test('unchanged snapshots still apply a smaller retention limit', () => {
+  loadBackupModule().initBackupAdapter();
+  existingPaths.add(BACKUP_DIR);
+  for (const [name, stamp] of [
+    ['old.json', 1000],
+    ['middle.json', 2000],
+    ['new.json', 3000],
+  ]) {
+    backupFiles.set(name, stamp);
+    storedFiles.set(path.resolve(BACKUP_DIR, name), '{}');
+  }
+  let writes = 0;
+  writeFileSyncImpl = () => writes++;
+  handleHandlers.get('BACKUP')({}, { data: {}, maxBackupFiles: 1 });
+  assert.equal(writes, 0);
+  assert.deepEqual([...backupFiles.keys()], ['new.json']);
 });

@@ -127,6 +127,22 @@ const listBackupFiles = (): LocalBackupMeta[] => {
   return files.sort((a, b) => b.created - a.created);
 };
 
+/**
+ * Whether the newest backup file already holds exactly this snapshot. Reads the
+ * file rather than caching, so a deleted or damaged backup is always replaced.
+ */
+const isNewestBackup = (backup: string): boolean => {
+  const newest = listBackupFiles()[0];
+  if (!newest) {
+    return false;
+  }
+  try {
+    return readFileSync(newest.path, 'utf8') === backup;
+  } catch {
+    return false;
+  }
+};
+
 interface BackupDataArgs {
   data: AppDataCompleteLegacy | AppDataComplete;
   maxBackupFiles?: number | null;
@@ -154,7 +170,11 @@ function backupData(
 
   try {
     const backup = JSON.stringify(data);
-    writeFileSync(filePath, backup);
+    // An idle app still backs up every 5 minutes. Writing the same snapshot
+    // again would push older, different backups out of the retention window.
+    if (!isNewestBackup(backup)) {
+      writeFileSync(filePath, backup);
+    }
     cleanupOldBackups(maxBackupFiles);
   } catch (e) {
     log('Error while backing up');
