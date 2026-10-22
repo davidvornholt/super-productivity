@@ -836,15 +836,38 @@ const parseShortSyntaxDate = async (
   // Skip an email's at-sign the same way: a date word or digits in its domain
   // or the prose after it must not erase the address, and an "@date" after it
   // still counts. Attached syntax such as "lunch@12" stays a trigger.
-  const rr =
-    [...text.matchAll(regEx)].find((m) => {
-      const index = m.index ?? 0;
-      const charBeforeTrigger = index > 0 ? text.charAt(index - 1) : '';
-      if (!charBeforeTrigger || charBeforeTrigger === ' ') {
-        return true;
+  let rr: RegExpMatchArray | null = null;
+  for (const m of text.matchAll(regEx)) {
+    const index = m.index ?? 0;
+    const charBeforeTrigger = index > 0 ? text.charAt(index - 1) : '';
+    if (charBeforeTrigger && charBeforeTrigger !== ' ') {
+      if (isDeadline) {
+        continue;
       }
-      return !isDeadline && !EMAIL_DOMAIN_START_REG_EX.test(m[0]);
-    }) ?? null;
+      if (EMAIL_DOMAIN_START_REG_EX.test(m[0])) {
+        // Prefer established day-dot-month syntax ("Termin@3.okt.") only when
+        // chrono recognizes the entire token, never a fragment of "3.okt.de"
+        // or an arbitrary numeric domain such as "3.com".
+        const token = m[0].match(/^@\d{1,2}\.\S+/)?.[0];
+        if (!token) {
+          continue;
+        }
+        const dateParser = await loadShortSyntaxDateParser(dateLocale);
+        const [date] = dateParser.parse(token, now, { forwardDate: true });
+        if (
+          !date ||
+          date.index !== 1 ||
+          date.text.length !== token.length - 1 ||
+          !date.start.isCertain('day') ||
+          !date.start.isCertain('month')
+        ) {
+          continue;
+        }
+      }
+    }
+    rr = m;
+    break;
+  }
 
   if (rr && rr[0]) {
     const triggerIndex = rr.index ?? 0;

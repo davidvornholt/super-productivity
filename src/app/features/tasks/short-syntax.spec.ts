@@ -4203,6 +4203,37 @@ describe('shortSyntax localized dates', () => {
   // A UI-language short word is a date only right after the trigger: further in
   // it is ordinary text, and a match there would eat the title up to it
   describe('UI-language words inside a token', () => {
+    it('should parse complete attached day-dot-month dates and consume only their range', async () => {
+      for (const [language, prefix, expression] of [
+        ['de', 'Termin', '@3.okt'],
+        ['de', 'Termin', '@3.okt.'],
+        ['de', 'Termin', '@3.Oktober'],
+        ['fi', 'Task', '@3.lokakuuta'],
+      ]) {
+        for (const isDayFirst of [true, false]) {
+          for (const suffix of ['', ' vorbereiten']) {
+            const title = `${prefix}${expression}${suffix}`;
+            const context = `${title}, isDayFirst=${isDayFirst}`;
+            const r = await parseIn({ language, isDayFirst }, title);
+            expect(r?.taskChanges.title).withContext(context).toBe(`${prefix}${suffix}`);
+            expect(formatDateToISO(dueOf(r)))
+              .withContext(context)
+              .toBe('2027-10-03');
+            expect(r?.taskChanges.hasPlannedTime).withContext(context).toBe(false);
+            expect(r?.parsedRanges)
+              .withContext(context)
+              .toEqual([
+                {
+                  type: 'due',
+                  start: prefix.length,
+                  end: prefix.length + expression.length,
+                },
+              ]);
+          }
+        }
+      }
+    });
+
     it('should keep an email before a full date word without adding dates', async () => {
       for (const [locale, template] of [
         [DEFAULT_DATE_INPUT_LOCALE, 'Mail max@DOMAIN tomorrow reply'],
@@ -4242,6 +4273,10 @@ describe('shortSyntax localized dates', () => {
         [DEFAULT_DATE_INPUT_LOCALE, 'Mail max@firma2.de'],
         [{ language: 'de', isDayFirst: true }, 'Mail an max@morgen.de beantworten'],
         [{ language: 'de', isDayFirst: true }, 'Mail an redaktion@heute.de'],
+        [{ language: 'de', isDayFirst: true }, 'Mail user@3.okt.de morgen'],
+        [{ language: 'de', isDayFirst: false }, 'Mail user@3.okt.de morgen'],
+        [{ language: 'de', isDayFirst: true }, 'Mail user@3.com morgen'],
+        [{ language: 'fi', isDayFirst: true }, 'Mail user@3.lokakuuta.fi'],
       ] as const) {
         const r = await parseIn(locale, title, { ...CONFIG, isEnableDeadline: true });
         expect(r?.taskChanges.title ?? title)
