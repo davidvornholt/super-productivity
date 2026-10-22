@@ -881,6 +881,13 @@ const parseShortSyntaxDate = async (
 
     if (parsedDateArr.length) {
       const parsedDateResult = parsedDateArr[0];
+      // Chrono can find a date word after an email domain. Reject the whole
+      // token here: filtering out that result would let digits in the domain
+      // fall through to the numeric-hour fallback and still erase the address.
+      // Leave other prefixes to chrono (apostrophes, ordinals, CJK, "v2", ...).
+      if (/^@\S+\.\p{L}{2,}(?:\s|$)/u.test(rr[0].slice(0, parsedDateResult.index))) {
+        return null;
+      }
       const start = parsedDateResult.start;
       const due = start.date().getTime();
       let hasPlannedTime = true;

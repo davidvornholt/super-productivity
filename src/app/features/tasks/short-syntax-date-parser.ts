@@ -139,23 +139,12 @@ const isBetterMatch = (a: ParsedResult, b: ParsedResult, isTieWinner: boolean): 
 // leaves a leading article or preposition out of it ("@le 5 mars", "@el
 // lunes", "@um 15 Uhr").
 const isShortWord = (text: string): boolean => /^\p{L}{1,3}\.?$/u.test(text.trim());
-// Chrono may also leave leading words out of a match, but never part of a
-// word: after an email domain ("max@example.com tomorrow") the match would
-// erase the address up to the date word.
-const isAfterWholeWords = (text: string, result: ParsedResult): boolean =>
-  /^[@!]?\s*(?:\p{L}+\s+)*$/u.test(text.slice(0, result.index));
 const isTrustedUiResult = (text: string, result: ParsedResult): boolean =>
-  isAfterWholeWords(text, result) &&
-  (/^[@!]?\s*$/.test(text.slice(0, result.index)) || !isShortWord(result.text));
-
-const parseAfterWholeWords = (parser: Chrono): ShortSyntaxDateParser => ({
-  parse: (text, ref, option) =>
-    parser.parse(text, ref, option).filter((result) => isAfterWholeWords(text, result)),
-});
+  /^[@!]?\s*$/.test(text.slice(0, result.index)) || !isShortWord(result.text);
 
 const combine = (
   uiParser: Chrono,
-  enParser: ShortSyntaxDateParser,
+  enParser: Chrono,
   isUiTieWinner: boolean,
 ): ShortSyntaxDateParser => ({
   parse: (text, ref, option) => {
@@ -198,9 +187,7 @@ export const loadShortSyntaxDateParser = (
   let promise = parserPromiseCache.get(key);
   if (!promise) {
     promise = Promise.all([loadEn(), loadUiLocale?.()]).then(([en, ui]) => {
-      const enParser = parseAfterWholeWords(
-        createChrono(en.Chrono, en, locale.isDayFirst),
-      );
+      const enParser = createChrono(en.Chrono, en, locale.isDayFirst);
       const parser = ui
         ? combine(
             createChrono(en.Chrono, ui, locale.isDayFirst),
