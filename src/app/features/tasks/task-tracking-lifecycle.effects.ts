@@ -103,6 +103,12 @@ export class TaskTrackingLifecycleEffects {
                 finalize(() => {
                   this._isCloseRegistered = false;
                   this._close.setDone(TRACKING_BEFORE_CLOSE_ID);
+                  // A cancelled quit can resume tracking while writes drain.
+                  // Re-arm after setDone: main removes every matching id on ack.
+                  if (this._taskService.currentTaskId()) {
+                    this._close.schedule(TRACKING_BEFORE_CLOSE_ID);
+                    this._isCloseRegistered = true;
+                  }
                 }),
               ),
             ),

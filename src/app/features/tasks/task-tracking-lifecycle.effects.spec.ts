@@ -1,4 +1,5 @@
 import { TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
 import { Action } from '@ngrx/store';
 import { Subject, Subscription } from 'rxjs';
@@ -32,6 +33,7 @@ describe('TaskTrackingLifecycleEffects', () => {
     task = jasmine.createSpyObj<TaskService>('TaskService', [
       'flushAccumulatedTimeSpent',
       'setCurrentId',
+      'currentTaskId',
     ]);
     writes = jasmine.createSpyObj<OperationWriteFlushService>('writes', [
       'flushPendingWrites',
@@ -102,15 +104,47 @@ describe('TaskTrackingLifecycleEffects', () => {
     expect(close.schedule).not.toHaveBeenCalled();
   });
 
-  it('registers once without sync and re-arms after a cancelled quit and restart', fakeAsync(() => {
+  it('re-arms after a cancelled quit even if tracking restarts before the drain settles', fakeAsync(() => {
     setup(true);
+    let complete!: () => void;
+    writes.flushPendingWrites.and.returnValue(new Promise<void>((r) => (complete = r)));
+    const currentTaskId = signal<string | null>('task');
+    task.currentTaskId.and.callFake(currentTaskId);
+    task.setCurrentId.and.callFake((id) => {
+      currentTaskId.set(id);
+    });
+    const pendingIds = new Set<string>();
+    close.schedule.and.callFake((id) => {
+      pendingIds.add(id);
+    });
+    close.setDone.and.callFake((id) => {
+      pendingIds.delete(id);
+    });
     ready.next(true);
     actions.next(setCurrentTask({ id: 'task' }));
     expect(close.schedule).toHaveBeenCalledOnceWith(TRACKING_BEFORE_CLOSE_ID);
     closing.next([TRACKING_BEFORE_CLOSE_ID]);
-    flushMicrotasks();
+    // The user cancels the finish-day dialog and resumes while writes still drain.
+    currentTaskId.set('task');
     actions.next(setCurrentTask({ id: 'task' }));
+    expect(close.setDone).not.toHaveBeenCalled();
+    complete();
+    flushMicrotasks();
+    expect(pendingIds.has(TRACKING_BEFORE_CLOSE_ID)).toBeTrue();
     expect(close.schedule).toHaveBeenCalledTimes(2);
+
+    // The next ordinary quit must drain again and must not re-arm itself.
+    closing.next([...pendingIds]);
+    flushMicrotasks();
+    expect(writes.flushPendingWrites).toHaveBeenCalledTimes(2);
+    expect(currentTaskId()).toBeNull();
+    expect(pendingIds.size).toBe(0);
+    expect(close.schedule).toHaveBeenCalledTimes(2);
+
+    // Resuming after the drain has settled still re-arms as before.
+    currentTaskId.set('task');
+    actions.next(setCurrentTask({ id: 'task' }));
+    expect(pendingIds.has(TRACKING_BEFORE_CLOSE_ID)).toBeTrue();
   }));
 
   it('waits for all writes before acknowledging its own id alongside other handlers', fakeAsync(() => {
