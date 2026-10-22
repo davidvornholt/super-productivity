@@ -275,14 +275,71 @@ test('unchanged snapshots keep the newest backup without another write', () => {
   assert.equal(writes, 1);
 });
 
-test('a changed snapshot is written even if an older backup matches it', () => {
+test('equal-mtime backups preserve the current snapshot with a one-file limit', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 0, 31, 12) });
   loadBackupModule().initBackupAdapter();
   existingPaths.add(BACKUP_DIR);
-  backupFiles.set('old.json', 1000);
-  backupFiles.set('new.json', 2000);
   const data = { task: { ids: ['synthetic'], entities: {} } };
-  storedFiles.set(path.resolve(BACKUP_DIR, 'old.json'), JSON.stringify(data));
-  storedFiles.set(path.resolve(BACKUP_DIR, 'new.json'), '{}');
+  for (const [name, contents] of [
+    ['2026-01-31_080000.json', JSON.stringify(data)],
+    ['2026-01-31_090000.json', '{}'],
+  ]) {
+    backupFiles.set(name, new Date(2026, 0, 31, 10).getTime());
+    storedFiles.set(path.resolve(BACKUP_DIR, name), contents);
+  }
+
+  handleHandlers.get('BACKUP')({}, { data, maxBackupFiles: 1 });
+
+  assert.equal(backupFiles.size, 1);
+  assert.deepEqual([...storedFiles.values()], [JSON.stringify(data)]);
+});
+
+test('unchanged daily backups preserve January state after thirty February changes', (t) => {
+  const start = new Date(2026, 0, 1).getTime();
+  const february = new Date(2026, 1, 1).getTime();
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  loadBackupModule().initBackupAdapter();
+  const backup = handleHandlers.get('BACKUP');
+  const data = { task: { ids: ['synthetic'], entities: {} } };
+  let writes = 0;
+  const write = writeFileSyncImpl;
+  writeFileSyncImpl = (...args) => {
+    writes++;
+    return write(...args);
+  };
+
+  for (let now = start; now < february; now += 5 * 60 * 1000) {
+    t.mock.timers.setTime(now);
+    backup({}, { data });
+  }
+  const januaryWrites = writes;
+  for (let change = 0; change < 30; change++) {
+    t.mock.timers.setTime(february + change * 5 * 60 * 1000);
+    backup({}, { data: { task: { ids: [`february-${change}`], entities: {} } } });
+  }
+
+  const january31 = [...backupFiles.keys()].find((name) => name.startsWith('2026-01-31'));
+  assert.ok(january31, 'the daily retention window must keep the January 31 snapshot');
+  assert.equal(
+    storedFiles.get(path.resolve(BACKUP_DIR, january31)),
+    JSON.stringify(data),
+  );
+  assert.equal(januaryWrites, 31, 'unchanged calls write once per calendar day');
+  assert.equal(writes, 61, 'each February change still writes a backup');
+});
+
+test('a changed snapshot is written even if an older backup matches it', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 0, 31, 12) });
+  loadBackupModule().initBackupAdapter();
+  existingPaths.add(BACKUP_DIR);
+  backupFiles.set('2026-01-31_080000.json', 1000);
+  backupFiles.set('2026-01-31_090000.json', 2000);
+  const data = { task: { ids: ['synthetic'], entities: {} } };
+  storedFiles.set(
+    path.resolve(BACKUP_DIR, '2026-01-31_080000.json'),
+    JSON.stringify(data),
+  );
+  storedFiles.set(path.resolve(BACKUP_DIR, '2026-01-31_090000.json'), '{}');
   let writes = 0;
   const write = writeFileSyncImpl;
   writeFileSyncImpl = (...args) => {
@@ -293,10 +350,11 @@ test('a changed snapshot is written even if an older backup matches it', () => {
   assert.equal(writes, 1);
 });
 
-test('an unreadable newest backup does not suppress a new snapshot', () => {
+test('an unreadable newest backup does not suppress a new snapshot', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 0, 31, 12) });
   loadBackupModule().initBackupAdapter();
   existingPaths.add(BACKUP_DIR);
-  backupFiles.set('new.json', 2000);
+  backupFiles.set('2026-01-31_090000.json', 2000);
   readFailure = new Error('synthetic unreadable backup');
   let writes = 0;
   const write = writeFileSyncImpl;
@@ -308,13 +366,14 @@ test('an unreadable newest backup does not suppress a new snapshot', () => {
   assert.equal(writes, 1);
 });
 
-test('unchanged snapshots still apply a smaller retention limit', () => {
+test('unchanged snapshots still apply a smaller retention limit', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 0, 31, 12) });
   loadBackupModule().initBackupAdapter();
   existingPaths.add(BACKUP_DIR);
   for (const [name, stamp] of [
-    ['old.json', 1000],
-    ['middle.json', 2000],
-    ['new.json', 3000],
+    ['2026-01-31_080000.json', 1000],
+    ['2026-01-31_090000.json', 2000],
+    ['2026-01-31_100000.json', 3000],
   ]) {
     backupFiles.set(name, stamp);
     storedFiles.set(path.resolve(BACKUP_DIR, name), '{}');
@@ -323,5 +382,5 @@ test('unchanged snapshots still apply a smaller retention limit', () => {
   writeFileSyncImpl = () => writes++;
   handleHandlers.get('BACKUP')({}, { data: {}, maxBackupFiles: 1 });
   assert.equal(writes, 0);
-  assert.deepEqual([...backupFiles.keys()], ['new.json']);
+  assert.deepEqual([...backupFiles.keys()], ['2026-01-31_100000.json']);
 });

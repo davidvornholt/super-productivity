@@ -124,16 +124,18 @@ const listBackupFiles = (): LocalBackupMeta[] => {
       log(`Skipping unreadable backup file ${name}`);
     }
   }
-  return files.sort((a, b) => b.created - a.created);
+  // Match retention's tie-breaker so it keeps the file used for comparison.
+  return files.sort((a, b) => b.created - a.created || b.name.localeCompare(a.name));
 };
 
 /**
- * Whether the newest backup file already holds exactly this snapshot. Reads the
- * file rather than caching, so a deleted or damaged backup is always replaced.
+ * Whether today's newest backup file already holds exactly this snapshot.
+ * Use the filename date, like retention, to preserve daily backup coverage.
+ * Read the file rather than caching so deleted or damaged backups are replaced.
  */
-const isNewestBackup = (backup: string): boolean => {
+const isNewestBackup = (backup: string, timestamp: string): boolean => {
   const newest = listBackupFiles()[0];
-  if (!newest) {
+  if (!newest || !newest.name.startsWith(timestamp.slice(0, 10))) {
     return false;
   }
   try {
@@ -162,7 +164,8 @@ function backupData(
   if (!existsSync(BACKUP_DIR)) {
     mkdirSync(BACKUP_DIR);
   }
-  const filePath = `${BACKUP_DIR}/${getBackupTimestamp()}.json`;
+  const timestamp = getBackupTimestamp();
+  const filePath = `${BACKUP_DIR}/${timestamp}.json`;
   const data = isBackupDataArgs(dataOrArgs) ? dataOrArgs.data : dataOrArgs;
   const maxBackupFiles = isBackupDataArgs(dataOrArgs)
     ? dataOrArgs.maxBackupFiles
@@ -171,8 +174,8 @@ function backupData(
   try {
     const backup = JSON.stringify(data);
     // An idle app still backs up every 5 minutes. Writing the same snapshot
-    // again would push older, different backups out of the retention window.
-    if (!isNewestBackup(backup)) {
+    // again on the same day would push older backups out of the retention window.
+    if (!isNewestBackup(backup, timestamp)) {
       writeFileSync(filePath, backup);
     }
     cleanupOldBackups(maxBackupFiles);
