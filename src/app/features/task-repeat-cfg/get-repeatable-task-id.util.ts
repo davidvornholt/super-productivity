@@ -79,5 +79,4 @@ export const getRepeatableTaskIdDay = (
 export const getRepeatInstanceDay = (
   task: Pick<Task, 'id' | 'created'>,
   repeatCfgId: string,
-): string =>
-  getRepeatableTaskIdDay(task.id, repeatCfgId) ?? getDbDateStr(task.created);
+): string => getRepeatableTaskIdDay(task.id, repeatCfgId) ?? getDbDateStr(task.created);
