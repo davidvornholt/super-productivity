@@ -243,4 +243,17 @@ describe('TaskTimeSyncService.addTick', () => {
     expect((sync[0] as ReturnType<typeof syncTimeSpent>).duration).toBe(10000);
     expect(storedTask().timeSpent).toBe(70000);
   });
+
+  // Delete reads the task after flushOne, so the deleted copy must hold every tick.
+  it('adds buffered ticks to the task when flushing that task', () => {
+    setup(true, [
+      createTask('task-1', { timeSpentOnDay: { [DAY]: 60000 }, timeSpent: 60000 }),
+    ]);
+    expect([tick(), tick(), tick()]).toEqual([ADD, BUFFER, BUFFER]);
+
+    service.flushOne('task-1');
+
+    expect(storedTask().timeSpent).toBe(63000);
+    expect(storedTask().timeSpentOnDay).toEqual({ [DAY]: 63000 });
+  });
 });

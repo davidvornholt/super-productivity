@@ -2,6 +2,7 @@ import { Action, ActionReducer } from '@ngrx/store';
 import { RootState } from '../root-state';
 import { TASK_FEATURE_NAME } from '../../features/tasks/store/task.reducer';
 import {
+  addTimeSpentForBuffer,
   TASK_TIME_BUFFER_FEATURE_KEY,
   TaskTimeBuffer,
 } from '../../features/tasks/store/task-time-buffer.reducer';
@@ -37,17 +38,7 @@ export const taskTimeBufferMetaReducer = (
     }
     const task = state[TASK_FEATURE_NAME].entities[buffer.taskId];
     const stateWithTime: RootState = task
-      ? reducer(
-          state,
-          TimeTrackingActions.addTimeSpent({
-            task,
-            date: buffer.date,
-            duration: buffer.duration,
-            isFromTrackingReminder: false,
-            workStart: buffer.firstTickAt,
-            workEnd: buffer.lastTickAt,
-          }),
-        )
+      ? reducer(state, addTimeSpentForBuffer(task, buffer))
       : state;
     return reducer({ ...stateWithTime, [TASK_TIME_BUFFER_FEATURE_KEY]: null }, action);
   };

@@ -481,16 +481,16 @@ export class TaskService {
   }
 
   removeMultipleTasks(taskIds: string[]): void {
-    // Store issue metadata in the sidecar *before* dispatching, so the
-    // deleteIssueOnBulkTaskDelete$ effect can pick it up.
+    const subIds = (id: string): string[] => this._taskEntities()[id]?.subTaskIds ?? [];
+    const affectedTaskIds = unique(taskIds.flatMap((id) => [id, ...subIds(id)]));
+    // Read after flushing so the deleted copies hold exact times, as in remove().
+    affectedTaskIds.forEach((id) => this._taskTimeSync.flushOne(id));
     const entities = this._taskEntities();
-    const affectedTaskIds = Array.from(
-      new Set(taskIds.flatMap((id) => [id, ...(entities[id]?.subTaskIds ?? [])])),
-    );
     const tasks = affectedTaskIds
       .map((id) => entities[id])
       .filter((task): task is Task => !!task);
-    affectedTaskIds.forEach((id) => this._taskTimeSync.clearOne(id));
+    // Store issue metadata in the sidecar *before* dispatching, so the
+    // deleteIssueOnBulkTaskDelete$ effect can pick it up.
     this._deletedTaskIssueSidecar.set(
       tasks
         .filter((t) => !!t.issueId && !!t.issueType && !!t.issueProviderId)

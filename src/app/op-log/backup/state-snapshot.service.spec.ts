@@ -18,7 +18,10 @@ import { selectTimeTrackingState } from '../../features/time-tracking/store/time
 import { selectPluginUserDataFeatureState } from '../../plugins/store/plugin-user-data.reducer';
 import { selectPluginMetadataFeatureState } from '../../plugins/store/plugin-metadata.reducer';
 import { selectReminderFeatureState } from '../../features/reminder/store/reminder.reducer';
-import { ArchiveModel } from '../../features/time-tracking/time-tracking.model';
+import {
+  ArchiveModel,
+  TimeTrackingState,
+} from '../../features/time-tracking/time-tracking.model';
 import { initialTimeTrackingState } from '../../features/time-tracking/store/time-tracking.reducer';
 import { TaskTimeSyncService } from '../../features/tasks/task-time-sync.service';
 import { DEFAULT_TASK, Task, TaskState } from '../../features/tasks/task.model';
@@ -219,26 +222,35 @@ describe('StateSnapshotService', () => {
         ids: ['task1'],
         entities: { task1: task },
       });
+      const minute = (m: number): number => new Date(2024, 0, 15, 10, m).getTime();
       store.setState({
         taskTimeBuffer: {
           taskId: 'task1',
           date: '2024-01-15',
           duration: 5000,
-          firstTickAt: 1,
-          lastTickAt: 2,
+          firstTickAt: minute(0) + 10000,
+          lastTickAt: minute(0) + 50000,
         },
       });
       // Of the 65 s, the 5 s buffered ones are also still waiting to be synced.
       TestBed.inject(TaskTimeSyncService).accumulate('task1', 5000, '2024-01-15');
 
-      const liveTask = (service.getStateSnapshot().task as TaskState).entities['task1']!;
-      const opLogTask = (service.getStateSnapshotForOperationLog().task as TaskState)
-        .entities['task1']!;
+      const live = service.getStateSnapshot();
+      const opLog = service.getStateSnapshotForOperationLog();
+      const liveTask = (live.task as TaskState).entities['task1']!;
+      const opLogTask = (opLog.task as TaskState).entities['task1']!;
 
       expect(liveTask.timeSpent).toBe(65000);
       expect(liveTask.timeSpentOnDay).toEqual({ ['2024-01-15']: 65000 });
       expect(opLogTask.timeSpent).toBe(60000);
       expect(opLogTask.timeSpentOnDay).toEqual({ ['2024-01-15']: 60000 });
+      // Work stamps as the meta-reducer would set them, rounded to minutes.
+      const stamps = { s: minute(0), e: minute(1) };
+      for (const snapshot of [live, opLog]) {
+        const timeTracking = snapshot.timeTracking as TimeTrackingState;
+        expect(timeTracking.project['project-1']['2024-01-15']).toEqual(stamps);
+        expect(timeTracking.tag['TODAY']['2024-01-15']).toEqual(stamps);
+      }
     });
 
     it('should exclude a task-time delta whose operation write is still pending', () => {

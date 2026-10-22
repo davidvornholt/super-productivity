@@ -387,7 +387,7 @@ describe('TaskService', () => {
     });
 
     it('should include cascade-deleted subtasks in conflict-recovery snapshots', () => {
-      const clearOneSpy = spyOn(taskTimeSync, 'clearOne');
+      const flushOneSpy = spyOn(taskTimeSync, 'flushOne');
       const parent = createMockTask('parent', { subTaskIds: ['subtask'] });
       const subtask = createMockTask('subtask', { parentId: 'parent' });
       store.overrideSelector(selectTaskEntities, { parent, subtask });
@@ -400,7 +400,26 @@ describe('TaskService', () => {
         | undefined;
       expect(action?.taskIds).toEqual(['parent']);
       expect(action?.tasks?.map(({ id }) => id)).toEqual(['parent', 'subtask']);
-      expect(clearOneSpy.calls.allArgs()).toEqual([['parent'], ['subtask']]);
+      expect(flushOneSpy.calls.allArgs()).toEqual([['parent'], ['subtask']]);
+    });
+
+    it('should snapshot tasks after flushing their pending time', () => {
+      const task = createMockTask('task-1', { timeSpent: 0 });
+      store.overrideSelector(selectTaskEntities, { [task.id]: task });
+      store.refreshState();
+      spyOn(taskTimeSync, 'flushOne').and.callFake(() => {
+        store.overrideSelector(selectTaskEntities, {
+          [task.id]: { ...task, timeSpent: 59000 },
+        });
+        store.refreshState();
+      });
+
+      service.removeMultipleTasks([task.id]);
+
+      const action = (store.dispatch as jasmine.Spy).calls.mostRecent().args[0] as
+        | ReturnType<typeof TaskSharedActions.deleteTasks>
+        | undefined;
+      expect(action?.tasks?.map(({ timeSpent }) => timeSpent)).toEqual([59000]);
     });
   });
 

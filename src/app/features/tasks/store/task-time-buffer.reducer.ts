@@ -1,7 +1,6 @@
 import { createReducer, on } from '@ngrx/store';
 import { TimeTrackingActions } from '../../time-tracking/store/time-tracking.actions';
-import { TaskState } from '../task.model';
-import { updateTimeSpentForTask } from './task.reducer.util';
+import { Task } from '../task.model';
 
 export const TASK_TIME_BUFFER_FEATURE_KEY = 'taskTimeBuffer' as const;
 
@@ -37,23 +36,20 @@ export const taskTimeBufferReducer = createReducer<TaskTimeBuffer | null>(
   }),
 );
 
-/** Adds buffered time to its task exactly as the addTimeSpent reducer would. */
-export const addBufferedTimeToTaskState = (
-  taskState: TaskState,
-  buffer: TaskTimeBuffer | null | undefined,
-): TaskState => {
-  const task = buffer && taskState.entities[buffer.taskId];
-  if (!buffer || !task) {
-    return taskState;
-  }
-  return updateTimeSpentForTask(
-    task.id,
-    {
-      ...task.timeSpentOnDay,
-      [buffer.date]:
-        ((task.timeSpentOnDay && +task.timeSpentOnDay[buffer.date]) || 0) +
-        buffer.duration,
-    },
-    taskState,
-  );
-};
+/**
+ * The addTimeSpent pass that adds a buffer to its task: task time plus the
+ * work-context start and end stamps. Never dispatched; taskTimeBufferMetaReducer
+ * and StateSnapshotService run it through the reducers directly.
+ */
+export const addTimeSpentForBuffer = (
+  task: Task,
+  buffer: TaskTimeBuffer,
+): ReturnType<typeof TimeTrackingActions.addTimeSpent> =>
+  TimeTrackingActions.addTimeSpent({
+    task,
+    date: buffer.date,
+    duration: buffer.duration,
+    isFromTrackingReminder: false,
+    workStart: buffer.firstTickAt,
+    workEnd: buffer.lastTickAt,
+  });
