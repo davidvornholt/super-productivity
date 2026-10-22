@@ -80,7 +80,10 @@ describe('Desktop tick buffer across a logical-day boundary', () => {
     advance(1000);
     advance(1000);
     sync.flush();
-    expect(current().timeSpentOnDay).toEqual({ ['2026-01-04']: 3000, ['2026-01-05']: 2000 });
+    expect(current().timeSpentOnDay).toEqual({
+      ['2026-01-04']: 3000,
+      ['2026-01-05']: 2000,
+    });
     expect(current().timeSpent).toBe(5000);
     expect(store.selectSignal(selectTaskTimeBuffer)()).toBeNull();
   });
