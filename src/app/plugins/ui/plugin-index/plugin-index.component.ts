@@ -11,9 +11,10 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { Subscription } from 'rxjs';
+import { firstValueFrom, Subscription } from 'rxjs';
 import { trigger, transition, style, animate } from '@angular/animations';
 import { PluginService } from '../../plugin.service';
+import { DataInitStateService } from '../../../core/data-init/data-init-state.service';
 import { PluginBridgeService } from '../../plugin-bridge.service';
 import { PluginCleanupService } from '../../plugin-cleanup.service';
 import {
@@ -83,6 +84,7 @@ export class PluginIndexComponent implements OnInit, OnDestroy {
   private readonly _elRef = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly _sanitizer = inject(DomSanitizer);
   private readonly _pluginService = inject(PluginService);
+  private readonly _dataInitStateService = inject(DataInitStateService);
   private readonly _pluginBridge = inject(PluginBridgeService);
   private readonly _cleanupService = inject(PluginCleanupService);
   private readonly _translateService = inject(TranslateService);
@@ -170,9 +172,13 @@ export class PluginIndexComponent implements OnInit, OnDestroy {
   private async _waitForPluginSystem(): Promise<void> {
     // Check if plugin system is already initialized
     if (!this._pluginService.isInitialized()) {
-      // Initialize it immediately
+      // A plugin route can mount before hydration. Discovery must read the saved
+      // enablement settings, not the store's initial empty metadata slice.
+      await firstValueFrom(this._dataInitStateService.isAllDataLoadedInitially$);
       try {
-        await this._pluginService.initializePlugins();
+        if (!this._pluginService.isInitialized()) {
+          await this._pluginService.initializePlugins();
+        }
       } catch (error) {
         PluginLog.err('Failed to initialize plugin system:', error);
         throw new Error('Failed to initialize plugin system');
