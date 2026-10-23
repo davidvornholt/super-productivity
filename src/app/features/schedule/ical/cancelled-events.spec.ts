@@ -30,23 +30,29 @@ STATUS:CONFIRMED
 END:VEVENT`);
     expect(events.map((event) => event.id)).toEqual(['active']);
   });
-  it('omits a cancelled series including detached overrides', async () => {
-    expect(
-      await read(`BEGIN:VEVENT
+  for (const { description, rule } of [
+    { description: 'count-limited', rule: 'COUNT=3' },
+    { description: 'ended before the query window', rule: 'UNTIL=20261023T120000Z' },
+  ]) {
+    it(`omits a cancelled series (${description}) including detached overrides`, async () => {
+      expect(
+        await read(`BEGIN:VEVENT
 UID:series
-DTSTART:20261023T120000Z
-DTEND:20261023T130000Z
-RRULE:FREQ=DAILY;COUNT=3
+DTSTART:20261022T120000Z
+DTEND:20261022T130000Z
+RRULE:FREQ=DAILY;${rule}
 SUMMARY:Cancelled series
 STATUS:CANCELLED
 END:VEVENT
 BEGIN:VEVENT
 UID:series
-RECURRENCE-ID:20261024T120000Z
+RECURRENCE-ID:20261023T120000Z
 DTSTART:20261024T140000Z
 DTEND:20261024T150000Z
 SUMMARY:Old override
+STATUS:CONFIRMED
 END:VEVENT`),
-    ).toEqual([]);
-  });
+      ).toEqual([]);
+    });
+  }
 });

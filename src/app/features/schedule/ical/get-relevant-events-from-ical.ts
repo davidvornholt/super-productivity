@@ -599,6 +599,11 @@ const getAllPossibleEventsAfterStartFromIcal = (
       // Check if it's a recurring event that might have future occurrences
       const rrule = ve.getFirstPropertyValue('rrule');
       if (rrule) {
+        // Keep cancelled masters so their detached overrides remain suppressed
+        // even when the series ended before the query window.
+        if (ve.getFirstPropertyValue('status') === 'CANCELLED') {
+          return true;
+        }
         const until = (rrule as { until?: unknown }).until;
         if (!until) {
           // No end date means infinite recurrence
