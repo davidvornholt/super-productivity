@@ -59,6 +59,88 @@ const readCarriedTask = (page: Page, title: string): Promise<CarriedTask> =>
   }, title);
 
 test.describe('Completing a project with recurring work', () => {
+  test('keeps recurrence owned by another project after a board move', async ({
+    page,
+    workViewPage,
+    projectPage,
+    taskPage,
+  }) => {
+    await workViewPage.waitForTaskList();
+    await projectPage.createProject('Project A');
+    await projectPage.createProject('Project B');
+    await projectPage.navigateToProjectByName('Project B');
+    await workViewPage.waitForTaskList();
+    await workViewPage.addTask('Borrowed routine');
+    await taskPage.getTaskByText('Borrowed routine').focus();
+    await page.keyboard.press('i');
+    await openRecurDialog(page);
+    await saveRecurDialog(page);
+    await page.keyboard.press('Escape');
+    const before = await readCarriedTask(page, 'Borrowed routine');
+    expect(before.repeatCfgId).toBeTruthy();
+    expect(before.repeatCfgProjectId).toBe(before.projectId);
+
+    // The board moves only the instance; its recurrence continues to belong to B.
+    await page.goto('/#/boards');
+    await page.getByRole('tab').last().click();
+    const form = page.locator('board-edit');
+    const titles = form.getByRole('textbox', { name: 'Title', exact: true });
+    await titles.fill('Project handoff');
+    await form.getByRole('spinbutton', { name: 'Columns', exact: true }).fill('2');
+    for (const [i, project] of ['Project B', 'Project A'].entries()) {
+      await form.getByRole('button', { name: 'Add new Panel' }).click();
+      await expect(titles).toHaveCount(i + 2);
+      await titles.last().fill(project);
+      await form.getByRole('combobox', { name: 'Project', exact: true }).last().click();
+      await page.getByRole('option', { name: 'All Projects', exact: true }).click();
+      await page.getByRole('option').filter({ hasText: project }).click();
+      await page.keyboard.press('Escape');
+    }
+    await form.getByRole('button', { name: 'Save', exact: true }).click();
+    const panels = page.locator('board-panel');
+    const source = panels.nth(0).locator('planner-task');
+    const target = panels.nth(1).locator('planner-task');
+    await expect(source).toContainText('Borrowed routine');
+    await expect(target).toHaveCount(0);
+    await source.focus();
+    await page.keyboard.press('Control+Shift+ArrowRight');
+    await expect(target).toContainText('Borrowed routine');
+    await expect(source).toHaveCount(0);
+    const moved = await readCarriedTask(page, 'Borrowed routine');
+    expect(moved.projectId).not.toBe(before.projectId);
+    expect(moved.repeatCfgProjectId).toBe(before.projectId);
+
+    await projectPage.navigateToProjectByName('Project A');
+    await workViewPage.waitForTaskList();
+    await projectPage.openProjectContextMenu('Project A');
+    await page
+      .locator('.mat-mdc-menu-content button')
+      .filter({ hasText: /complete project/i })
+      .click();
+    await page
+      .locator('dialog-complete-resolve-tasks')
+      .getByRole('button', { name: /move to inbox/i })
+      .click();
+    await page
+      .locator('dialog-confirm')
+      .getByRole('button', { name: /complete project/i })
+      .click();
+    const celebration = page.locator('dialog-project-complete');
+    await expect(celebration).toBeVisible();
+    await celebration.locator('.actions button').click();
+    const after = await readCarriedTask(page, 'Borrowed routine');
+    expect(after.projectId).toBe('INBOX_PROJECT');
+    expect(after.repeatCfgProjectId).toBe(before.projectId);
+
+    await flushPendingWrites(page);
+    await page.reload();
+    await workViewPage.waitForTaskList();
+    expect(await readCarriedTask(page, 'Borrowed routine')).toEqual({
+      ...before,
+      projectId: 'INBOX_PROJECT',
+    });
+  });
+
   test('moves the recurrence to the Inbox with the work, so deleting the project keeps it', async ({
     page,
     workViewPage,

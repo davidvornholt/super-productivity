@@ -31,6 +31,8 @@ import { MenuTreeKind } from '../menu-tree/store/menu-tree.model';
 import { menuTreeFeatureKey } from '../menu-tree/store/menu-tree.reducer';
 import { TaskTimeSyncService } from '../tasks/task-time-sync.service';
 import { updateTaskRepeatCfg } from '../task-repeat-cfg/store/task-repeat-cfg.actions';
+import { selectTaskRepeatCfgByIdAllowUndefined } from '../task-repeat-cfg/store/task-repeat-cfg.selectors';
+import { DEFAULT_TASK_REPEAT_CFG } from '../task-repeat-cfg/task-repeat-cfg.model';
 
 describe('ProjectService', () => {
   let service: ProjectService;
@@ -737,6 +739,11 @@ describe('ProjectService', () => {
     });
 
     it('moves the repeat config to the Inbox once for several of its instances', async () => {
+      store.overrideSelector(selectTaskRepeatCfgByIdAllowUndefined, {
+        ...DEFAULT_TASK_REPEAT_CFG,
+        id: 'repeat-1',
+        projectId: 'project-1',
+      });
       const tasks = ['instance-1', 'instance-2'].map((id) =>
         createTask({ id, repeatCfgId: 'repeat-1', projectId: 'project-1' }),
       );

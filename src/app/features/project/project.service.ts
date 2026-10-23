@@ -58,6 +58,7 @@ import { MenuTreeService } from '../menu-tree/menu-tree.service';
 import { selectMenuTreeProjectTree } from '../menu-tree/store/menu-tree.selectors';
 import { TaskTimeSyncService } from '../tasks/task-time-sync.service';
 import { updateTaskRepeatCfg } from '../task-repeat-cfg/store/task-repeat-cfg.actions';
+import { selectTaskRepeatCfgByIdAllowUndefined } from '../task-repeat-cfg/store/task-repeat-cfg.selectors';
 
 export interface ProjectCompletionInfo {
   topLevelTasks: Task[];
@@ -242,9 +243,9 @@ export class ProjectService {
    * Carry unfinished work forward into the Inbox before completing a project.
    * Uses the normal per-task move action so every downstream effect (issue
    * sync, reminders) and per-entity conflict detection fires naturally.
-   * A recurring task's repeat config moves to the Inbox with it, like a menu
-   * move: the completed project would suspend it, and deleting the project
-   * would delete it. Its done instances stay with the completed project.
+   * A repeat config owned by the completing project moves to the Inbox with
+   * its task: completion would suspend it, and deletion would delete it.
+   * Configs owned by other projects and done instances stay where they are.
    * Done tasks are explicitly re-opened (setUnDone) so carried-over
    * work is actionable again in the Inbox — the move itself keeps isDone.
    * The trailing flush is the bulk-dispatch guard (sync-model Rule #6).
@@ -260,16 +261,25 @@ export class ProjectService {
         continue;
       }
       if (withSubTasks.repeatCfgId && !movedRepeatCfgIds.has(withSubTasks.repeatCfgId)) {
-        this._store$.dispatch(
-          updateTaskRepeatCfg({
-            taskRepeatCfg: {
-              id: withSubTasks.repeatCfgId,
-              changes: { projectId: INBOX_PROJECT.id },
-            },
-            isAskToUpdateAllTaskInstances: false,
+        const repeatCfg = await firstValueFrom(
+          this._store$.select(selectTaskRepeatCfgByIdAllowUndefined, {
+            id: withSubTasks.repeatCfgId,
           }),
         );
-        movedRepeatCfgIds.add(withSubTasks.repeatCfgId);
+        // Board moves can leave the recurrence owned by another active project.
+        // The input task retains the project being completed.
+        if (repeatCfg?.projectId === task.projectId) {
+          this._store$.dispatch(
+            updateTaskRepeatCfg({
+              taskRepeatCfg: {
+                id: withSubTasks.repeatCfgId,
+                changes: { projectId: INBOX_PROJECT.id },
+              },
+              isAskToUpdateAllTaskInstances: false,
+            }),
+          );
+          movedRepeatCfgIds.add(withSubTasks.repeatCfgId);
+        }
       }
       this._taskService.moveToProject(withSubTasks, INBOX_PROJECT.id);
       if (task.isDone) {
