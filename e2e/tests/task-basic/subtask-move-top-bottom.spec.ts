@@ -61,6 +61,54 @@ test.describe('Subtask move to top/bottom', () => {
     await expect(subTasks.locator('task-title')).toHaveText([/Sub A/, /Sub B/, /Sub C/]);
   });
 
+  for (const isDone of [false, true]) {
+    test(`moves ${isDone ? 'completed' : 'unfinished'} detail-panel subtask to top of siblings via keyboard`, async ({
+      page,
+      workViewPage,
+      taskPage,
+      testPrefix,
+    }) => {
+      const { parent, subTasks } = await seedParentWithSubTasks(
+        workViewPage,
+        taskPage,
+        `${testPrefix}-Parent`,
+      );
+      if (isDone) {
+        await taskPage.markTaskAsDone(subTasks.filter({ hasText: 'Sub C' }));
+        await parent.locator('.toggle-sub-tasks-btn').first().click();
+        await expect(subTasks.filter({ hasText: 'Sub C' })).toBeHidden();
+      }
+
+      await parent.focus();
+      await page.keyboard.press('i');
+      const panel = page.locator('task-detail-panel');
+      await panel
+        .locator('mat-expansion-panel-header')
+        .filter({ hasText: 'Subtasks' })
+        .click();
+      if (isDone) {
+        await panel.locator('.expand-tasks-btn').click();
+      }
+      const panelSubTasks = panel.locator('task');
+      const subC = panelSubTasks.filter({ hasText: 'Sub C' });
+      await expect(panelSubTasks.locator('task-title')).toHaveText([
+        /Sub A/,
+        /Sub B/,
+        /Sub C/,
+      ]);
+      await expect(subC).toBeVisible();
+      await subC.focus();
+      await expect(subC).toBeFocused();
+      await page.keyboard.press('Control+Alt+ArrowUp');
+      await expect(panelSubTasks.locator('task-title')).toHaveText([
+        /Sub C/,
+        /Sub A/,
+        /Sub B/,
+      ]);
+      await expect(subC).toBeFocused();
+    });
+  }
+
   test('moves a subtask shown on its own in Today within Today via keyboard', async ({
     page,
     workViewPage,
