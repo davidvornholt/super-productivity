@@ -236,8 +236,14 @@ export class FocusModeEffects {
         }
         return this.store.select(selectTaskById, { id: pausedTaskId }).pipe(
           take(1),
-          filter((task) => !!task && !task.isDone),
-          map(() => setCurrentTask({ id: pausedTaskId })),
+          switchMap((task) => {
+            if (!task) return EMPTY;
+            if (!task.isDone) return of(setCurrentTask({ id: pausedTaskId }));
+            // Resume already restarted the timer; completed work needs task selection.
+            return timer.purpose === 'work'
+              ? of(actions.selectFocusTask(), actions.showFocusOverlay())
+              : EMPTY;
+          }),
         );
       }),
     ),
