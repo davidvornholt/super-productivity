@@ -81,9 +81,17 @@ test.describe('Completing a project with recurring work', () => {
     expect(before.repeatCfgProjectId).toBe(before.projectId);
 
     // The board moves only the instance; its recurrence continues to belong to B.
-    await page.goto('/#/boards');
-    await page.getByRole('tab').last().click();
     const form = page.locator('board-edit');
+    // Closing the detail panel can still navigate back to the project after
+    // the boards route has loaded, so navigate again until the add tab opens.
+    await expect(async () => {
+      await page.goto('/#/boards');
+      await page
+        .getByRole('tab')
+        .filter({ hasText: 'add_circle' })
+        .click({ timeout: 2000 });
+      await expect(form).toBeVisible({ timeout: 2000 });
+    }).toPass();
     const titles = form.getByRole('textbox', { name: 'Title', exact: true });
     await titles.fill('Project handoff');
     await form.getByRole('spinbutton', { name: 'Columns', exact: true }).fill('2');
