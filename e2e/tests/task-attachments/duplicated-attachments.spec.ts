@@ -90,6 +90,16 @@ test('duplicate attachment edits and deletion stay scoped to the copied task', a
   await expect
     .poll(() => attachmentPath(page, originalId))
     .toBe('https://attachment.example.test/original');
+  const copiedAttachments = await page.evaluate((domId) => {
+    let state: RootState | undefined;
+    (
+      window as Window & { __e2eTestHelpers: { store: Store<RootState> } }
+    ).__e2eTestHelpers.store
+      .subscribe((s) => (state = s))
+      .unsubscribe();
+    return state?.tasks.entities[domId!.slice(2)]?.attachments;
+  }, copyId);
+  expect(copiedAttachments).toEqual([]);
 });
 
 test('duplicating a family preserves parent and child attachments after reload', async ({
