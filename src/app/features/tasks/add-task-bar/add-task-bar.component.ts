@@ -491,7 +491,7 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
     const rawInput = this.stateService.inputTxt().trim();
     if (!rawInput) return;
 
-    const title = currentState.cleanText || rawInput;
+    const title = this._parserService.getTitleForSubmit(this.stateService.inputTxt());
     if (!title) return;
 
     this._isAddingTask = true;
