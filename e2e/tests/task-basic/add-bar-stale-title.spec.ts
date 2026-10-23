@@ -73,3 +73,92 @@ test('submitting while the date parser loads keeps the words typed last', async 
     .poll(() => readTitles(page), { timeout: 5000 })
     .toEqual(['Cold parser base  suffix']);
 });
+
+test('submitting a menu repeat while the date parser loads keeps its template clean', async ({
+  page,
+  workViewPage,
+}) => {
+  // Keep the first occurrence in the future so overdue cleanup cannot move it.
+  const dueDay = `${new Date().getFullYear() + 1}-12-01`;
+  await workViewPage.waitForTaskList();
+  await page.locator('.tour-addBtn').click();
+  const input = page.locator('add-task-bar.global .main-input');
+  await input.fill('Draft');
+  const readCleanText = (): Promise<string | null> =>
+    input.evaluate((element) => {
+      const ng = (
+        window as Window & {
+          ng: {
+            getComponent(element: Element): {
+              stateService: { state(): { cleanText: string | null } };
+            };
+          };
+        }
+      ).ng;
+      return ng.getComponent(element.closest('add-task-bar')!).stateService.state()
+        .cleanText;
+    });
+  await expect.poll(readCleanText).toBe('Draft');
+  await page.locator('[data-test="add-task-bar-repeat-btn"]').click();
+  await page.getByRole('menuitem', { name: 'Every day', exact: true }).click();
+  await expect(input).toBeFocused();
+
+  // Hold the real lazy parser chunk until after Enter, so the race cannot
+  // disappear on a faster machine. No parser result is stubbed.
+  let releaseParser!: () => void;
+  const parserGate = new Promise<void>((resolve) => (releaseParser = resolve));
+  let heldScripts = 0;
+  await page.route(/\.js(?:\?|$)/, async (route) => {
+    heldScripts++;
+    await parserGate;
+    await route.continue();
+  });
+  try {
+    await input.fill(`Draft @${dueDay} suffix`);
+    await expect.poll(() => heldScripts).toBeGreaterThan(0);
+    expect(await readCleanText()).toBe('Draft');
+    await input.press('Enter');
+  } finally {
+    releaseParser();
+  }
+
+  const readRepeat = (): Promise<{
+    title?: string;
+    dueDay?: string;
+    templateTitle?: string;
+    startDate?: string;
+  }> =>
+    page.evaluate(() => {
+      type RepeatState = RootState & {
+        taskRepeatCfg: {
+          entities: Record<string, { title: string; startDate: string }>;
+        };
+      };
+      const store = (
+        window as Window & { __e2eTestHelpers: { store: Store<RepeatState> } }
+      ).__e2eTestHelpers.store;
+      let state: RepeatState | undefined;
+      store.subscribe((value) => (state = value)).unsubscribe();
+      const task = Object.values(state?.tasks.entities ?? {})[0];
+      const cfg = task?.repeatCfgId
+        ? state?.taskRepeatCfg.entities[task.repeatCfgId]
+        : undefined;
+      return {
+        title: task?.title,
+        dueDay: task?.dueDay,
+        templateTitle: cfg?.title,
+        startDate: cfg?.startDate,
+      };
+    });
+  const expected = {
+    title: 'Draft  suffix',
+    dueDay,
+    templateTitle: 'Draft  suffix',
+    startDate: dueDay,
+  };
+  await expect.poll(readRepeat).toEqual(expected);
+  await flushPendingWrites(page);
+  await page.reload();
+  await workViewPage.waitForTaskList();
+  await expect.poll(readRepeat).toEqual(expected);
+});

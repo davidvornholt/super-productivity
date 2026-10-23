@@ -38,6 +38,7 @@ import { T } from '../../../t.const';
 import {
   distinctUntilChanged,
   filter,
+  finalize,
   first,
   map,
   startWith,
@@ -355,6 +356,7 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
   private _autocompleteTimeout?: number;
   private _processingAutocompleteSelection = false;
   private _isAddingTask = false;
+  private _pendingTextParse?: Promise<void>;
   private _defaultTagIds: string[] = [];
 
   ngOnInit(): void {
@@ -433,17 +435,23 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
         switchMap(
           ([title, config, allTags, allProjects, defaultProject, defaultDateInfo]) => {
             const { date, time } = defaultDateInfo;
-            return from(
-              this._parserService.parseAndUpdateText(
-                title || '',
-                config,
-                allProjects,
-                allTags,
-                defaultProject!,
-                date,
-                time,
-                this._dateTimeFormatService.dateInputLocale(),
-              ),
+            const parse = this._parserService.parseAndUpdateText(
+              title || '',
+              config,
+              allProjects,
+              allTags,
+              defaultProject!,
+              date,
+              time,
+              this._dateTimeFormatService.dateInputLocale(),
+            );
+            this._pendingTextParse = parse;
+            return from(parse).pipe(
+              finalize(() => {
+                if (this._pendingTextParse === parse) {
+                  this._pendingTextParse = undefined;
+                }
+              }),
             );
           },
         ),
@@ -487,16 +495,27 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
       return;
     }
 
-    const currentState = this.stateService.state();
-    const rawInput = this.stateService.inputTxt().trim();
-    if (!rawInput) return;
-
-    const title = this._parserService.getTitleForSubmit(this.stateService.inputTxt());
-    if (!title) return;
+    const inputText = this.stateService.inputTxt();
+    if (!inputText.trim()) return;
 
     this._isAddingTask = true;
     try {
-      const state = currentState;
+      // ShortSyntaxEffects cleans up the task only, not its repeat template.
+      // Wait for an in-flight parse before copying its title and scheduling
+      // metadata into that template. Already-parsed submits stay synchronous.
+      if (this.stateService.state().repeat) {
+        while (this._pendingTextParse) {
+          await this._pendingTextParse;
+          // Keep a new draft (or a closed bar) from being submitted by the
+          // earlier Enter once the lazy date-parser chunk finally arrives.
+          if (this.stateService.inputTxt() !== inputText || this._destroyRef.destroyed) {
+            return;
+          }
+        }
+      }
+      const title = this._parserService.getTitleForSubmit(inputText);
+      if (!title) return;
+      const state = this.stateService.state();
       let finalTagIds = [...state.tagIds, ...state.tagIdsFromTxt];
 
       if (this.hasNewTags()) {
