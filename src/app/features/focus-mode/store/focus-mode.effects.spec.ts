@@ -20,7 +20,11 @@ import * as selectors from './focus-mode.selectors';
 import { FocusModeMode, FocusScreen, TimerState } from '../focus-mode.model';
 import { unsetCurrentTask, setCurrentTask } from '../../tasks/store/task.actions';
 import { openIdleDialog } from '../../idle/store/idle.actions';
-import { selectLastCurrentTask, selectTaskById } from '../../tasks/store/task.selectors';
+import {
+  selectLastCurrentTask,
+  selectTaskById,
+  selectTaskEntities,
+} from '../../tasks/store/task.selectors';
 import {
   selectFocusModeConfig,
   selectSoundConfig,
@@ -143,6 +147,12 @@ describe('FocusModeEffects', () => {
             { selector: selectIsFocusModeEnabled, value: true },
             { selector: selectSoundConfig, value: { volume: 75 } },
             { selector: selectLastCurrentTask, value: null },
+            {
+              selector: selectTaskEntities,
+              value: {
+                ['test-paused-task-id']: { ...DEFAULT_TASK, id: 'test-paused-task-id' },
+              },
+            },
           ],
         }),
         { provide: FocusModeStrategyFactory, useValue: strategyFactoryMock },
@@ -1030,6 +1040,42 @@ describe('FocusModeEffects', () => {
       });
     });
   });
+
+  for (const isDeleted of [false, true]) {
+    it(`does not reopen a ${isDeleted ? 'deleted' : 'done'} task when a break ends`, (done) => {
+      const id = 'test-paused-task-id';
+      store.overrideSelector(
+        selectTaskEntities,
+        isDeleted
+          ? {}
+          : {
+              [id]: { ...DEFAULT_TASK, id, projectId: 'INBOX', isDone: true },
+            },
+      );
+      actions$ = of(actions.completeBreak({ pausedTaskId: id }));
+      effects.resumeTrackingOnBreakComplete$.pipe(toArray()).subscribe((result) => {
+        expect(result).toEqual([]);
+        done();
+      });
+    });
+
+    it(`does not reopen a ${isDeleted ? 'deleted' : 'done'} task when a break is skipped`, (done) => {
+      const id = 'test-paused-task-id';
+      store.overrideSelector(
+        selectTaskEntities,
+        isDeleted
+          ? {}
+          : {
+              [id]: { ...DEFAULT_TASK, id, projectId: 'INBOX', isDone: true },
+            },
+      );
+      actions$ = of(actions.skipBreak({ pausedTaskId: id }));
+      effects.skipBreak$.pipe(toArray()).subscribe((result) => {
+        expect(result).toEqual([actions.startFocusSession({ duration: 25 * 60 * 1000 })]);
+        done();
+      });
+    });
+  }
 
   describe('cancelSession$', () => {
     it('should dispatch unsetCurrentTask when session is cancelled', (done) => {
@@ -2377,8 +2423,8 @@ describe('FocusModeEffects', () => {
 
       actions$ = of(actions.startFocusSession({ duration: 25 * 60 * 1000 }));
 
-      effects.syncSessionStartToTracking$.subscribe((action) => {
-        expect(action.type).toEqual('[FocusMode] Show Overlay');
+      effects.syncSessionStartToTracking$.pipe(toArray()).subscribe((result) => {
+        expect(result).toEqual([actions.selectFocusTask(), actions.showFocusOverlay()]);
         done();
       });
     });
@@ -2432,8 +2478,8 @@ describe('FocusModeEffects', () => {
 
       actions$ = of(actions.startFocusSession({ duration: 25 * 60 * 1000 }));
 
-      effects.syncSessionStartToTracking$.subscribe((action) => {
-        expect(action.type).toEqual('[FocusMode] Show Overlay');
+      effects.syncSessionStartToTracking$.pipe(toArray()).subscribe((result) => {
+        expect(result).toEqual([actions.selectFocusTask(), actions.showFocusOverlay()]);
         done();
       });
     });
@@ -2928,8 +2974,8 @@ describe('FocusModeEffects', () => {
 
         actions$ = of(actions.startFocusSession({ duration: 25 * 60 * 1000 }));
 
-        effects.syncSessionStartToTracking$.subscribe((action) => {
-          expect(action.type).toEqual('[FocusMode] Show Overlay');
+        effects.syncSessionStartToTracking$.pipe(toArray()).subscribe((result) => {
+          expect(result).toEqual([actions.selectFocusTask(), actions.showFocusOverlay()]);
           done();
         });
       });
