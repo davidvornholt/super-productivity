@@ -40,6 +40,7 @@ import { LanguageService } from 'src/app/core/language/language.service';
 import { TranslateService } from '@ngx-translate/core';
 import { T } from '../../t.const';
 import { getDateTimeFromClockString } from '../../util/get-date-time-from-clock-string';
+import { DateService } from '../../core/date/date.service';
 import { parseDbDateStr } from '../../util/parse-db-date-str';
 
 describe('TaskViewCustomizerService', () => {
@@ -1025,6 +1026,44 @@ describe('TaskViewCustomizerService', () => {
     expect(filtered.length).toBe(1);
     expect(filtered[0].id).toBe('dl-today');
   });
+
+  for (const field of [FILTER_OPTION_TYPE.deadline, FILTER_OPTION_TYPE.scheduledDate]) {
+    it(`buckets all-day and timed ${field} values by logical day across a month boundary`, () => {
+      jasmine.clock().install();
+      try {
+        jasmine.clock().mockDate(new Date(2030, 5, 1, 2, 30));
+        TestBed.inject(DateService).setStartOfNextDayDiff('04:00');
+        const dates = [
+          { id: 'current-day', day: '2030-05-31', time: null },
+          { id: 'current-time', day: null, time: new Date(2030, 5, 1, 2).getTime() },
+          { id: 'next-day', day: '2030-06-01', time: null },
+          { id: 'next-time', day: null, time: new Date(2030, 5, 1, 4, 30).getTime() },
+        ];
+        const tasks = dates.map(({ id, day, time }) => ({
+          ...mockTasks[0],
+          id,
+          deadlineDay: day,
+          deadlineWithTime: time,
+          dueDay: day,
+          dueWithTime: time,
+        }));
+        for (const value of [FILTER_SCHEDULE.today, FILTER_SCHEDULE.thisMonth]) {
+          expect(service['applyFilter'](tasks, field, value).map((t) => t.id)).toEqual([
+            'current-day',
+            'current-time',
+          ]);
+        }
+        for (const value of [FILTER_SCHEDULE.tomorrow, FILTER_SCHEDULE.nextMonth]) {
+          expect(service['applyFilter'](tasks, field, value).map((t) => t.id)).toEqual([
+            'next-day',
+            'next-time',
+          ]);
+        }
+      } finally {
+        jasmine.clock().uninstall();
+      }
+    });
+  }
 
   it('should filter by deadline using deadlineWithTime when deadlineDay is not set', () => {
     const todayTimestamp = new Date().getTime();
