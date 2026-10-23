@@ -108,3 +108,37 @@ describe('checklist-operations', () => {
     });
   });
 });
+
+describe('checklist edits around fenced code examples', () => {
+  for (const fence of ['```', '~~~', '````']) {
+    const notes = `Intro\r\n${fence}markdown\r\n- [x] source\r\n- [ ] code\r\n${fence}\r\n- [x] done\r\n- [ ] todo\r\nEnd`;
+    it(`preserves ${fence} fenced content when clearing completed items`, () => {
+      expect(removeCheckedChecklistItems(notes)).toBe(
+        notes.replace('- [x] done\r\n', ''),
+      );
+    });
+    it(`preserves ${fence} fenced content when checking or unchecking`, () => {
+      expect(setAllChecklistItemsChecked(notes, true)).toBe(
+        notes.replace('- [ ] todo', '- [x] todo'),
+      );
+      expect(setAllChecklistItemsChecked(notes, false)).toBe(
+        notes.replace('- [x] done', '- [ ] done'),
+      );
+    });
+    it(`indexes ${fence} rendered items without counting code examples`, () => {
+      expect(toggleChecklistItemAtIndex(notes, 1)).toBe(
+        notes.replace('- [ ] todo', '- [x] todo'),
+      );
+    });
+  }
+  it('keeps shorter fence-like lines inside a longer code fence', () => {
+    const notes = '````markdown\n```\n- [x] source\n```\n````\n- [x] done';
+    expect(removeCheckedChecklistItems(notes)).toBe(
+      '````markdown\n```\n- [x] source\n```\n````',
+    );
+  });
+  it('keeps items inside an unclosed fence', () => {
+    const notes = '- [ ] real\n```\n- [x] source';
+    expect(removeCheckedChecklistItems(notes)).toBe(notes);
+  });
+});

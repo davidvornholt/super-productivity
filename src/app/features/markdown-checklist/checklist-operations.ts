@@ -23,29 +23,61 @@ export const isChecklistItemLine = (line: string): boolean =>
 export const isCheckedItemLine = (line: string): boolean => CHECKED_ITEM_RE.test(line);
 
 /**
+ * Locate editable items without treating fenced code examples as checklists.
+ * Keep line indices so edits retain all other source text and line endings.
+ */
+export const getChecklistItemLineIndices = (lines: string[]): number[] => {
+  const indices: number[] = [];
+  let fenceChar = '';
+  let fenceLength = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(lines[i].replace(/\r$/, ''));
+    if (fenceChar) {
+      if (
+        fence &&
+        fence[1][0] === fenceChar &&
+        fence[1].length >= fenceLength &&
+        fence[2].trim() === ''
+      ) {
+        fenceChar = '';
+      }
+      continue;
+    }
+    if (fence && (fence[1][0] === '~' || !fence[2].includes('`'))) {
+      fenceChar = fence[1][0];
+      fenceLength = fence[1].length;
+      continue;
+    }
+    if (isChecklistItemLine(lines[i])) {
+      indices.push(i);
+    }
+  }
+  return indices;
+};
+
+/**
  * Sets every checklist item to checked or unchecked, leaving non-item lines untouched.
  */
-export const setAllChecklistItemsChecked = (notes: string, checked: boolean): string =>
-  notes
-    .split('\n')
-    .map((line) => {
-      if (!isChecklistItemLine(line)) {
-        return line;
-      }
-      return checked
-        ? line.replace(/- \[[ ]?\]/, '- [x]')
-        : line.replace(/- \[[xX]\]/, '- [ ]');
-    })
-    .join('\n');
+export const setAllChecklistItemsChecked = (notes: string, checked: boolean): string => {
+  const lines = notes.split('\n');
+  for (const index of getChecklistItemLineIndices(lines)) {
+    lines[index] = checked
+      ? lines[index].replace(/- \[[ ]?\]/, '- [x]')
+      : lines[index].replace(/- \[[xX]\]/, '- [ ]');
+  }
+  return lines.join('\n');
+};
 
 /**
  * Removes all checked checklist items, keeping unchecked items and any other lines.
  */
-export const removeCheckedChecklistItems = (notes: string): string =>
-  notes
-    .split('\n')
-    .filter((line) => !isCheckedItemLine(line))
-    .join('\n');
+export const removeCheckedChecklistItems = (notes: string): string => {
+  const lines = notes.split('\n');
+  const checkedIndices = new Set(
+    getChecklistItemLineIndices(lines).filter((index) => isCheckedItemLine(lines[index])),
+  );
+  return lines.filter((_, index) => !checkedIndices.has(index)).join('\n');
+};
 
 /**
  * Toggles the checked state of the Nth checklist item (0-based, in document
@@ -59,18 +91,12 @@ export const toggleChecklistItemAtIndex = (notes: string, nthItem: number): stri
     return notes;
   }
   const lines = notes.split('\n');
-  let seen = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (!isChecklistItemLine(lines[i])) {
-      continue;
-    }
-    seen++;
-    if (seen === nthItem) {
-      lines[i] = isCheckedItemLine(lines[i])
-        ? lines[i].replace(/- \[[xX]\]/, '- [ ]')
-        : lines[i].replace('- [ ]', '- [x]');
-      return lines.join('\n');
-    }
+  const index = getChecklistItemLineIndices(lines)[nthItem];
+  if (index === undefined) {
+    return notes;
   }
-  return notes;
+  lines[index] = isCheckedItemLine(lines[index])
+    ? lines[index].replace(/- \[[xX]\]/, '- [ ]')
+    : lines[index].replace('- [ ]', '- [x]');
+  return lines.join('\n');
 };
