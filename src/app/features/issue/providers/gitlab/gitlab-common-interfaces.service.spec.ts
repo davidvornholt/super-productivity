@@ -1,5 +1,8 @@
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { map, of, throwError } from 'rxjs';
+import { IssueLog } from '../../../../core/log';
+import { HANDLED_ERROR_PROP_STR } from '../../../../app.constants';
+import { mapGitlabIssue } from './gitlab-issue-map.util';
 import { GitlabCommonInterfacesService } from './gitlab-common-interfaces.service';
 import { GitlabApiService } from './gitlab-api/gitlab-api.service';
 import { IssueProviderService } from '../../issue-provider.service';
@@ -7,6 +10,7 @@ import { DEFAULT_GITLAB_CFG } from './gitlab.const';
 import { GitlabIssue } from './gitlab-issue.model';
 import {
   GitlabOriginalComment,
+  GitlabOriginalIssue,
   GitlabOriginalUser,
 } from './gitlab-api/gitlab-api-responses';
 import { createTask } from '../../../tasks/task.test-helper';
@@ -127,6 +131,66 @@ describe('GitlabCommonInterfacesService', () => {
       ],
     });
     service = TestBed.inject(GitlabCommonInterfacesService);
+  });
+
+  it('isolates rejected and unchanged tasks, preserves update pairing and logs safe diagnostics', async () => {
+    const errorLog = spyOn(IssueLog, 'err');
+    const warningLog = spyOn(IssueLog, 'warn');
+    const tasks = ['http', 'mapping', 'unchanged', 'changed-1', 'changed-2'].map(
+      (id) => ({
+        ...makeTask(new Date(BASE_UPDATED_AT).getTime()),
+        id,
+        issueId: `project/repo#${id}`,
+      }),
+    );
+    const changedIssues = [1, 2].map((number) => ({
+      ...makeIssue(NEWER_UPDATED_AT),
+      id: `project/repo#changed-${number}`,
+      number,
+      title: `Changed ${number}`,
+    }));
+    gitlabApiService.getById$.and.callFake((id) => {
+      if (id === tasks[0].issueId) {
+        return throwError(() => ({ [HANDLED_ERROR_PROP_STR]: 'private HTTP error' }));
+      }
+      if (id === tasks[1].issueId) {
+        // A malformed GitLab response: mapGitlabIssue throws on references.full.
+        const response = {
+          title: 'private title',
+          description: 'private body',
+          web_url: 'https://private.example/?token=secret',
+        } as GitlabOriginalIssue;
+        return of(response).pipe(map((issue) => mapGitlabIssue(issue, BASE_CFG)));
+      }
+      return of(
+        changedIssues.find((issue) => issue.id === id) ?? makeIssue(BASE_UPDATED_AT),
+      );
+    });
+
+    const result = await service.getFreshDataForIssueTasks(tasks);
+
+    expect(gitlabApiService.getById$).toHaveBeenCalledTimes(tasks.length);
+    expect(result.map(({ task, issue }) => ({ task, issue }))).toEqual([
+      { task: tasks[3], issue: changedIssues[0] },
+      { task: tasks[4], issue: changedIssues[1] },
+    ]);
+    expect(result.map(({ taskChanges }) => taskChanges.title)).toEqual([
+      '#1 Changed 1',
+      '#2 Changed 2',
+    ]);
+    expect(result.every(({ taskChanges }) => taskChanges.issueWasUpdated)).toBeTrue();
+    expect(warningLog.calls.allArgs()).toEqual([
+      [
+        'Issue refresh failed in getFreshDataForIssueTask',
+        { taskId: 'http', providerKey: 'GITLAB', errorType: 'HandledError' },
+      ],
+    ]);
+    expect(errorLog.calls.allArgs()).toEqual([
+      [
+        'Issue refresh failed in getFreshDataForIssueTask',
+        { taskId: 'mapping', providerKey: 'GITLAB', errorType: 'TypeError' },
+      ],
+    ]);
   });
 
   describe('getFreshDataForIssueTask', () => {
