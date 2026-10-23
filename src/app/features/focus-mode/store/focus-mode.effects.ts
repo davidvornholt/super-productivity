@@ -236,7 +236,7 @@ export class FocusModeEffects {
         }
         return this.store.select(selectTaskById, { id: pausedTaskId }).pipe(
           take(1),
-          filter((task) => !!task),
+          filter((task) => !!task && !task.isDone),
           map(() => setCurrentTask({ id: pausedTaskId })),
         );
       }),

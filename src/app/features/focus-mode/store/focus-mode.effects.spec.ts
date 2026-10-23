@@ -931,7 +931,7 @@ describe('FocusModeEffects', () => {
 
       // Bug #6726 fix: Don't override user's task switch during break
       it('should NOT dispatch setCurrentTask when pausedTaskId exists but a different task is already being tracked', (done) => {
-        const pausedTaskId = 'original-task-id';
+        const pausedTaskId = 'test-paused-task-id';
         currentTaskId$.next('different-task-id');
         actions$ = of(actions.completeBreak({ pausedTaskId }));
 
@@ -1017,7 +1017,7 @@ describe('FocusModeEffects', () => {
 
     // Bug #6726 fix: Don't override user's task switch during break
     it('should NOT dispatch setCurrentTask when pausedTaskId exists but a different task is already being tracked', (done) => {
-      const pausedTaskId = 'original-task-id';
+      const pausedTaskId = 'test-paused-task-id';
       currentTaskId$.next('different-task-id');
       actions$ = of(actions.skipBreak({ pausedTaskId }));
       store.overrideSelector(selectors.selectMode, FocusModeMode.Countdown);
@@ -2154,6 +2154,34 @@ describe('FocusModeEffects', () => {
         done();
       });
     });
+
+    for (const purpose of ['work', 'break'] as const) {
+      it(`should NOT reopen a paused task completed during a paused ${purpose}`, (done) => {
+        store.overrideSelector(selectFocusModeConfig, {
+          isPauseTrackingDuringBreak: false,
+          isSkipPreparation: false,
+        });
+        store.overrideSelector(
+          selectors.selectTimer,
+          createMockTimer({ isRunning: true, purpose }),
+        );
+        store.overrideSelector(selectors.selectPausedTaskId, 'task-123');
+        store.overrideSelector(selectTaskById as any, {
+          id: 'task-123',
+          title: 'Test Task',
+          isDone: true,
+        });
+        currentTaskId$.next(null);
+        store.refreshState();
+
+        actions$ = of(actions.unPauseFocusSession());
+
+        effects.syncSessionResumeToTracking$.pipe(toArray()).subscribe((actionsArr) => {
+          expect(actionsArr).toEqual([]);
+          done();
+        });
+      });
+    }
 
     it('should NOT dispatch when no pausedTaskId', (done) => {
       store.overrideSelector(selectFocusModeConfig, {
