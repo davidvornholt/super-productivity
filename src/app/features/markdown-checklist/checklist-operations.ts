@@ -45,12 +45,12 @@ export const getChecklistItemLineIndices = (lines: string[]): number[] => {
   }
 
   // Container indentation and the end of a list item determine fence lifetime.
-  // Let Lezer resolve that grammar, but retain the existing item syntax outside
-  // fences (rather than adopting all of its task-list syntax).
+  // Let Lezer resolve that grammar, including code and HTML blocks containing
+  // fence-like text, but retain the existing item syntax outside those blocks.
   const fences: { from: number; to: number }[] = [];
   FENCE_PARSER.parse(lines.join('\n')).iterate({
     enter: ({ name, from, to }) => {
-      if (name === 'FencedCode') {
+      if (name === 'FencedCode' || name === 'CodeBlock' || name === 'HTMLBlock') {
         fences.push({ from, to });
         return false;
       }

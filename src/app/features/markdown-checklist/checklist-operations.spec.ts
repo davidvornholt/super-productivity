@@ -130,6 +130,14 @@ describe('checklist edits around fenced code examples', () => {
       ],
     },
     {
+      name: 'fences inside indented code and HTML blocks',
+      prefixes: [
+        ['    ```', '    - [x] source', '    ```'],
+        ['\t```', '\t- [x] source', '\t```'],
+        ['<pre>', '```', '- [x] source', '```', '</pre>', ''],
+      ],
+    },
+    {
       name: 'fence openers and lifetime inside list items',
       prefixes: [
         ['- ```', '  - [x] source', '  - [ ] code', '  ```', ''],
