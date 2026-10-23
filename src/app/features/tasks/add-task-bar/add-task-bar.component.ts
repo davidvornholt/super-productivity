@@ -489,6 +489,15 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
 
   // Public methods
   async addTask(): Promise<void> {
+    const inputText = this.stateService.inputTxt();
+    // Input and Enter can arrive before inputTxt$ delivers the new draft.
+    // Retire its stale waiter synchronously before checking for duplicates.
+    if (
+      this._activeSubmission?.isWaitingForParse &&
+      this._activeSubmission.inputText !== inputText
+    ) {
+      this._activeSubmission = undefined;
+    }
     if (this._processingAutocompleteSelection || this._activeSubmission) {
       return;
     }
@@ -503,7 +512,6 @@ export class AddTaskBarComponent implements AfterViewInit, OnInit, OnDestroy {
       return;
     }
 
-    const inputText = this.stateService.inputTxt();
     if (!inputText.trim()) return;
 
     const submission = { inputText, isWaitingForParse: false };

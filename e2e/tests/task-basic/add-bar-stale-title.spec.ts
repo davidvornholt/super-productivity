@@ -120,18 +120,33 @@ for (const edit of ['unchanged', 'date', 'plain'] as const) {
       expect(await readCleanText()).toBe('Draft');
       await input.press('Enter');
       expect(await readTitles(page)).toEqual([]);
-      if (edit !== 'unchanged') {
-        await input.fill(edit === 'date' ? `Latest @${dueDay} words` : 'Latest words');
-        if (edit === 'plain') {
-          await expect.poll(readCleanText).toBe('Latest words');
-        }
+      if (edit === 'date') {
+        // Deliver the edit and both Enters in one turn, before Angular's
+        // toObservable effect can retire the previous pending submission.
+        await input.evaluate(
+          (element, text) => {
+            (element as HTMLTextAreaElement).value = text;
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            for (let i = 0; i < 2; i++) {
+              element.dispatchEvent(
+                new KeyboardEvent('keydown', {
+                  key: 'Enter',
+                  bubbles: true,
+                  cancelable: true,
+                }),
+              );
+            }
+          },
+          `Latest @${dueDay.slice(0, -2)}02 words`,
+        );
+      } else if (edit === 'plain') {
+        await input.fill('Latest words');
+        await expect.poll(readCleanText).toBe('Latest words');
         await input.press('Enter');
         // Repeated Enter for the same draft must not create a second task.
         await input.press('Enter');
-        if (edit === 'plain') {
-          // A parse that no longer needs the held chunk can submit immediately.
-          await expect.poll(() => readTitles(page)).toEqual(['Latest words']);
-        }
+        // A parse that no longer needs the held chunk can submit immediately.
+        await expect.poll(() => readTitles(page)).toEqual(['Latest words']);
       }
     } finally {
       releaseParser();
@@ -142,6 +157,7 @@ for (const edit of ['unchanged', 'date', 'plain'] as const) {
       dueDay?: string;
       templateTitle?: string;
       startDate?: string;
+      templateCount: number;
     }> =>
       page.evaluate(() => {
         type RepeatState = RootState & {
@@ -163,6 +179,7 @@ for (const edit of ['unchanged', 'date', 'plain'] as const) {
           dueDay: task?.dueDay,
           templateTitle: cfg?.title,
           startDate: cfg?.startDate,
+          templateCount: Object.keys(state?.taskRepeatCfg.entities ?? {}).length,
         };
       });
     const expectedTitle =
@@ -177,12 +194,15 @@ for (const edit of ['unchanged', 'date', 'plain'] as const) {
             const date = new Date();
             return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
           })
-        : dueDay;
+        : edit === 'date'
+          ? `${dueDay.slice(0, -2)}02`
+          : dueDay;
     const expected = {
       title: expectedTitle,
       dueDay: expectedDay,
       templateTitle: expectedTitle,
       startDate: expectedDay,
+      templateCount: 1,
     };
     await expect.poll(() => readTitles(page)).toEqual([expectedTitle]);
     await expect.poll(readRepeat).toEqual(expected);
