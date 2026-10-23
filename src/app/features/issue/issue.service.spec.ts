@@ -213,6 +213,47 @@ describe('IssueService', () => {
     service = TestBed.inject(IssueService);
   });
 
+  describe('addTaskFromIssue - concurrent imports', () => {
+    const options = {
+      issueDataReduced: { id: 'JIRA-1', title: 'Synthetic issue' },
+      issueProviderId: 'provider-1',
+      issueProviderKey: 'JIRA' as const,
+    };
+
+    beforeEach(() => {
+      taskServiceSpy.checkForTaskWithIssueEverywhere.and.resolveTo(null);
+      taskServiceSpy.add.and.returnValue('new-task-id');
+      service.ISSUE_SERVICE_MAP['JIRA'].getAddTaskData = () => ({
+        title: 'Synthetic issue',
+      });
+    });
+
+    it('imports only once when the same issue is requested before archive lookup resolves', async () => {
+      const results = await Promise.all([
+        service.addTaskFromIssue(options),
+        service.addTaskFromIssue(options),
+      ]);
+      expect(taskServiceSpy.add).toHaveBeenCalledTimes(1);
+      expect(results).toEqual(['new-task-id', undefined]);
+    });
+
+    it('keeps separate provider configurations independent', async () => {
+      await Promise.all([
+        service.addTaskFromIssue(options),
+        service.addTaskFromIssue({ ...options, issueProviderId: 'provider-2' }),
+      ]);
+      expect(taskServiceSpy.add).toHaveBeenCalledTimes(2);
+    });
+
+    it('allows a retry after a failed lookup', async () => {
+      taskServiceSpy.checkForTaskWithIssueEverywhere.and.rejectWith(new Error('lookup'));
+      await expectAsync(service.addTaskFromIssue(options)).toBeRejected();
+      taskServiceSpy.checkForTaskWithIssueEverywhere.and.resolveTo(null);
+      await expectAsync(service.addTaskFromIssue(options)).toBeResolvedTo('new-task-id');
+      expect(taskServiceSpy.add).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('addTaskFromIssue - ICAL task already exists', () => {
     it('should NOT move existing ICAL task to current context when task already exists', async () => {
       const existingTask = createMockTask();

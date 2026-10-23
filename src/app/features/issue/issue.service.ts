@@ -86,10 +86,24 @@ const isIssueAwaitingNextOccurrence = (
   !!(issue as PlainspaceIssue).isRecurring &&
   !(issue as PlainspaceIssue).isDone;
 
+interface AddTaskFromIssueOptions {
+  issueDataReduced: IssueDataReduced;
+  issueProviderId: string;
+  issueProviderKey: IssueProviderKey;
+  additional?: Partial<Task>;
+  isAddToBacklog?: boolean;
+  isForceDefaultProject?: boolean;
+  // Automatic (non-user-initiated) import — a background backlog poll or
+  // calendar auto-import. Such imports fire regardless of what the user is
+  // viewing, so they must not inherit the active context's tag (#8673).
+  isAutoImport?: boolean;
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class IssueService {
+  private _pendingIssueImports = new Set<string>();
   private _taskService = inject(TaskService);
   private _jiraCommonInterfacesService = inject(JiraCommonInterfacesService);
   private _gitlabCommonInterfacesService = inject(GitlabCommonInterfacesService);
@@ -501,7 +515,26 @@ export class IssueService {
     }
   }
 
-  async addTaskFromIssue({
+  async addTaskFromIssue(options: AddTaskFromIssueOptions): Promise<string | undefined> {
+    const { issueDataReduced, issueProviderId } = options;
+    if (!issueDataReduced || !issueDataReduced.id || !issueProviderId) {
+      throw new Error('No issueData');
+    }
+    const key = JSON.stringify([issueProviderId, String(issueDataReduced.id)]);
+    // Archive lookup is async: two clicks can both observe "not imported".
+    // Reserve before the first await, across all import entry points.
+    if (this._pendingIssueImports.has(key)) {
+      return undefined;
+    }
+    this._pendingIssueImports.add(key);
+    try {
+      return await this._addTaskFromIssue(options);
+    } finally {
+      this._pendingIssueImports.delete(key);
+    }
+  }
+
+  private async _addTaskFromIssue({
     issueDataReduced,
     issueProviderId,
     issueProviderKey,
@@ -509,22 +542,7 @@ export class IssueService {
     isAddToBacklog = false,
     isForceDefaultProject = false,
     isAutoImport = false,
-  }: {
-    issueDataReduced: IssueDataReduced;
-    issueProviderId: string;
-    issueProviderKey: IssueProviderKey;
-    additional?: Partial<Task>;
-    isAddToBacklog?: boolean;
-    isForceDefaultProject?: boolean;
-    // Automatic (non-user-initiated) import — a background backlog poll or
-    // calendar auto-import. Such imports fire regardless of what the user is
-    // viewing, so they must not inherit the active context's tag (#8673).
-    isAutoImport?: boolean;
-  }): Promise<string | undefined> {
-    if (!issueDataReduced || !issueDataReduced.id || !issueProviderId) {
-      throw new Error('No issueData');
-    }
-
+  }: AddTaskFromIssueOptions): Promise<string | undefined> {
     const issueIdCandidates = this._getIssueIdCandidates(
       issueProviderKey,
       issueDataReduced,
