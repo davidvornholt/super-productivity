@@ -103,7 +103,10 @@ interface AddTaskFromIssueOptions {
   providedIn: 'root',
 })
 export class IssueService {
-  private _pendingIssueImports = new Set<string>();
+  private _pendingIssueImports = new Map<
+    string,
+    { promise: Promise<string | undefined>; hasForegroundRequest: boolean }
+  >();
   private _taskService = inject(TaskService);
   private _jiraCommonInterfacesService = inject(JiraCommonInterfacesService);
   private _gitlabCommonInterfacesService = inject(GitlabCommonInterfacesService);
@@ -522,13 +525,23 @@ export class IssueService {
     }
     const key = JSON.stringify([issueProviderId, String(issueDataReduced.id)]);
     // Archive lookup is async: two clicks can both observe "not imported".
-    // Reserve before the first await, across all import entry points.
-    if (this._pendingIssueImports.has(key)) {
+    const pending = this._pendingIssueImports.get(key);
+    if (pending) {
+      // Let one foreground caller finish its planning/board action when a
+      // background import won. Further clicks must not repeat that completion.
+      if (!options.isAutoImport && !pending.hasForegroundRequest) {
+        pending.hasForegroundRequest = true;
+        return pending.promise;
+      }
       return undefined;
     }
-    this._pendingIssueImports.add(key);
+    const promise = this._addTaskFromIssue(options);
+    this._pendingIssueImports.set(key, {
+      promise,
+      hasForegroundRequest: !options.isAutoImport,
+    });
     try {
-      return await this._addTaskFromIssue(options);
+      return await promise;
     } finally {
       this._pendingIssueImports.delete(key);
     }
