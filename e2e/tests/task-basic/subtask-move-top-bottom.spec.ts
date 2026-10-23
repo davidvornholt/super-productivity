@@ -2,6 +2,7 @@ import { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test.fixture';
 import { WorkViewPage } from '../../pages/work-view.page';
 import { TaskPage } from '../../pages/task.page';
+import { flushPendingWrites } from '../../utils/waits';
 
 // Move to top/bottom for subtasks via keyboard and context menu (#9460, #6650),
 // and via context menu for top-level tasks in the project backlog.
@@ -57,6 +58,48 @@ test.describe('Subtask move to top/bottom', () => {
     // the component re-focuses the moved task asynchronously
     await expect(subC).toBeFocused();
     await page.keyboard.press('Control+Alt+ArrowDown');
+    await expect(subTasks.locator('task-title')).toHaveText([/Sub A/, /Sub B/, /Sub C/]);
+  });
+
+  test('moves a subtask shown on its own in Today within Today via keyboard', async ({
+    page,
+    workViewPage,
+    taskPage,
+    testPrefix,
+  }) => {
+    // The parent stays unscheduled, so Today shows Sub B without it.
+    await page.goto('/#/project/INBOX_PROJECT/tasks');
+    const { subTasks } = await seedParentWithSubTasks(
+      workViewPage,
+      taskPage,
+      `${testPrefix}-Parent`,
+    );
+    const subB = subTasks.filter({ hasText: 'Sub B' });
+    await subB.focus();
+    await page.keyboard.press('Shift+T');
+
+    await page.goto('/#/tag/TODAY/tasks');
+    await workViewPage.waitForTaskList();
+    await workViewPage.addTask('Other');
+    const todayTitles = page.locator('work-view task task-title');
+    await expect(todayTitles).toHaveCount(2);
+    const subBInToday = page.locator('work-view task').filter({ hasText: 'Sub B' });
+
+    await subBInToday.focus();
+    await page.keyboard.press('Control+Alt+ArrowDown');
+    await expect(todayTitles).toHaveText([/Other/, /Sub B/]);
+    await expect(subBInToday).toBeFocused();
+    await page.keyboard.press('Control+Alt+ArrowUp');
+    await expect(todayTitles).toHaveText([/Sub B/, /Other/]);
+
+    await flushPendingWrites(page);
+    await page.reload();
+    await workViewPage.waitForTaskList();
+    await expect(todayTitles).toHaveText([/Sub B/, /Other/]);
+
+    // Its siblings keep their order.
+    await page.goto('/#/project/INBOX_PROJECT/tasks');
+    await workViewPage.waitForTaskList();
     await expect(subTasks.locator('task-title')).toHaveText([/Sub A/, /Sub B/, /Sub C/]);
   });
 
