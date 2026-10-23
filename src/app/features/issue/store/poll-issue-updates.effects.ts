@@ -104,26 +104,28 @@ export class PollIssueUpdatesEffects {
   );
 
   private _createUpdatePollTimer(provider: IssueProvider): Observable<unknown> {
-    return this._syncTriggerService.afterInitialSyncDoneStrict$.pipe(
-      first(),
-      switchMap(() =>
-        merge(
-          timer(
-            DELAY_BEFORE_ISSUE_POLLING,
-            this._issueService.getPollInterval(provider.issueProviderKey),
-          ),
-          getRefreshOnLook$(provider),
-        ),
+    return merge(
+      timer(
+        DELAY_BEFORE_ISSUE_POLLING,
+        this._issueService.getPollInterval(provider.issueProviderKey),
       ),
+      getRefreshOnLook$(provider),
+    ).pipe(
+      // Subscribe immediately to keep the startup deadline and early look events.
       // Preserve one pending startup/look refresh, cancelled with this provider's
       // timer. Unlike waitForSyncWindow, this must not time out into active replay.
       switchMap(() =>
-        this._hydrationState.isInSyncWindow()
-          ? this._hydrationState.isInSyncWindow$.pipe(
-              // The observable can replay a stale value in the same event turn.
-              first(() => !this._hydrationState.isInSyncWindow()),
-            )
-          : of(false),
+        this._syncTriggerService.afterInitialSyncDoneStrict$.pipe(
+          first(),
+          switchMap(() =>
+            this._hydrationState.isInSyncWindow()
+              ? this._hydrationState.isInSyncWindow$.pipe(
+                  // The observable can replay a stale value in the same event turn.
+                  first(() => !this._hydrationState.isInSyncWindow()),
+                )
+              : of(false),
+          ),
+        ),
       ),
       this._skipDuringSyncWindow,
       switchMap(() => this._getTasksForProvider(provider)),

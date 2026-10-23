@@ -115,7 +115,13 @@ describe('PollIssueUpdatesEffects', () => {
   });
 
   describe('pending refresh across a sync window', () => {
-    for (const { trigger, disable, initialSyncPending, windowMs } of [
+    for (const {
+      trigger,
+      disable,
+      initialSyncPending,
+      windowMs,
+      readyBeforeTickMs = 0,
+    } of [
       { trigger: 'startup', disable: false, initialSyncPending: false, windowMs: 1000 },
       { trigger: 'look', disable: false, initialSyncPending: false, windowMs: 2000 },
       { trigger: 'startup', disable: true, initialSyncPending: false, windowMs: 1000 },
@@ -123,6 +129,15 @@ describe('PollIssueUpdatesEffects', () => {
       { trigger: 'startup', disable: false, initialSyncPending: false, windowMs: 31000 },
       { trigger: 'startup', disable: false, initialSyncPending: true, windowMs: 1000 },
       { trigger: 'startup', disable: true, initialSyncPending: true, windowMs: 1000 },
+      { trigger: 'look', disable: false, initialSyncPending: true, windowMs: 2000 },
+      { trigger: 'look', disable: true, initialSyncPending: true, windowMs: 2000 },
+      {
+        trigger: 'startup',
+        disable: false,
+        initialSyncPending: true,
+        windowMs: 0,
+        readyBeforeTickMs: 5000,
+      },
     ]) {
       it(`${trigger}: disable=${disable}, initial sync pending=${initialSyncPending}, window=${windowMs}ms`, fakeAsync(() => {
         const provider = createMockIssueProvider({
@@ -153,10 +168,25 @@ describe('PollIssueUpdatesEffects', () => {
         // Publish the closed signal before opening the window: its observable
         // can still replay that old value within the visibility event's turn.
         TestBed.tick();
-        if (trigger === 'look') {
-          tick(DELAY_BEFORE_ISSUE_POLLING);
+        if (readyBeforeTickMs) {
+          tick(readyBeforeTickMs);
+          initialSyncDone$.next(true);
+          tick(DELAY_BEFORE_ISSUE_POLLING - readyBeforeTickMs - 1);
+          expect(issueServiceSpy.refreshIssueTasks).not.toHaveBeenCalled();
+          tick(1);
           expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
-          issueServiceSpy.refreshIssueTasks.calls.reset();
+          // Opening the gate must not move the original 8s deadline to 13s.
+          tick(readyBeforeTickMs);
+          expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
+          sub.unsubscribe();
+          return;
+        }
+        if (trigger === 'look') {
+          if (!initialSyncPending) {
+            tick(DELAY_BEFORE_ISSUE_POLLING);
+            expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
+            issueServiceSpy.refreshIssueTasks.calls.reset();
+          }
           spyOnProperty(document, 'visibilityState', 'get').and.returnValue('visible');
           // SyncTriggerService's constructor opens this synchronously before
           // the look listener, even with app sync disabled. No sync follows,
@@ -185,7 +215,6 @@ describe('PollIssueUpdatesEffects', () => {
         if (initialSyncPending) {
           expect(issueServiceSpy.refreshIssueTasks).not.toHaveBeenCalled();
           initialSyncDone$.next(true);
-          tick(DELAY_BEFORE_ISSUE_POLLING);
           TestBed.tick();
           tick();
         }
