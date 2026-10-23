@@ -11,6 +11,7 @@ import { provideMockStore } from '@ngrx/store/testing';
 import { selectAllProjects } from '../project/store/project.selectors';
 import { getTomorrow } from '../../util/get-tomorrow';
 import { getDbDateStr } from '../../util/get-db-date-str';
+import { getWeekRange } from '../../util/get-week-range';
 import { BehaviorSubject, Observable, of } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { WorkContextType } from '../work-context/work-context.model';
@@ -1034,7 +1035,6 @@ describe('TaskViewCustomizerService', () => {
       for (const { boundary, hour } of [
         { boundary: '04:00', hour: 4 },
         { boundary: '00:00', hour: 12 },
-        { boundary: '00:00', hour: 0 },
       ]) {
         it(`filters all-day and timed ${field} weeks at ${hour}:30 with boundary ${boundary} (week starts ${weekStart})`, () => {
           jasmine.clock().install();
@@ -1092,6 +1092,47 @@ describe('TaskViewCustomizerService', () => {
         });
       }
     }
+
+    it(`preserves midnight-boundary ${field} week filters for zero and negative settings`, () => {
+      jasmine.clock().install();
+      try {
+        for (const weekStart of [0, 1]) {
+          firstDayOfWeek = weekStart;
+          for (const hour of [0, 12, 23]) {
+            const now = new Date(2030, 5, weekStart === 1 ? 17 : 16, hour, 30);
+            jasmine.clock().mockDate(now);
+            for (const boundary of [0, -4]) {
+              TestBed.inject(DateService).setStartOfNextDayDiff(boundary);
+              const tasks = Array.from({ length: 30 }, (_, i) => ({
+                ...mockTasks[0],
+                id: `day-${i}`,
+                dueDay: getDbDateStr(new Date(2030, 5, i + 3)),
+                deadlineDay: getDbDateStr(new Date(2030, 5, i + 3)),
+              }));
+              for (const [value, daysAhead] of [
+                [FILTER_SCHEDULE.thisWeek, 0],
+                [FILTER_SCHEDULE.nextWeek, 7],
+              ] as const) {
+                const relativeDate = new Date(now);
+                relativeDate.setDate(now.getDate() + daysAhead);
+                // The original filter used this helper with the calendar date.
+                const range = getWeekRange(relativeDate, weekStart);
+                const expected = tasks.filter(
+                  (task) =>
+                    task.dueDay >= getDbDateStr(range.start) &&
+                    task.dueDay <= getDbDateStr(range.end),
+                );
+                expect(service['applyFilter'](tasks, field, value))
+                  .withContext(`${value}, boundary ${boundary}, hour ${hour}`)
+                  .toEqual(expected);
+              }
+            }
+          }
+        }
+      } finally {
+        jasmine.clock().uninstall();
+      }
+    });
 
     const fourHoursMs = 4 * 60 * 60 * 1000;
     for (const { label, now, boundary, currentDay, nextDay } of [

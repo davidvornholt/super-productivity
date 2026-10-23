@@ -10,6 +10,7 @@ import { Tag } from '../tag/tag.model';
 import { TODAY_TAG } from '../tag/tag.const';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { getDbDateStr } from '../../util/get-db-date-str';
+import { getWeekRange } from '../../util/get-week-range';
 import { WorkContextService } from '../work-context/work-context.service';
 import { WorkContextType } from '../work-context/work-context.model';
 import { ProjectService } from '../project/project.service';
@@ -673,6 +674,19 @@ export class TaskViewCustomizerService {
           return dateStr.startsWith(tomorrowStr);
         case FILTER_SCHEDULE.thisWeek:
         case FILTER_SCHEDULE.nextWeek: {
+          // Preserve the existing midnight-boundary behavior; this correction
+          // only changes filters that use a custom logical day.
+          if (startOfNextDayDiffMs === 0) {
+            const relativeDate = new Date(today);
+            if (value === FILTER_SCHEDULE.nextWeek) {
+              relativeDate.setDate(today.getDate() + 7);
+            }
+            const weekRange = getWeekRange(relativeDate, firstDayOfWeek);
+            return (
+              dateStr >= getDbDateStr(weekRange.start) &&
+              dateStr <= getDbDateStr(weekRange.end)
+            );
+          }
           // Logical today already has the correct local calendar date; applying
           // another timezone offset can move it into the previous week.
           const weekStart = new Date(today);
