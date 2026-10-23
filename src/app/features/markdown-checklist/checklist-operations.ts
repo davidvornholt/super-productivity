@@ -1,3 +1,5 @@
+import { GFM, parser } from '@lezer/markdown';
+
 /**
  * Pure helpers for manipulating markdown checklists stored as plain note strings.
  *
@@ -16,6 +18,7 @@
 // (toggle, bulk actions, progress badge, is-markdown-checklist).
 const CHECKLIST_ITEM_RE = /^\s*- \[[ xX]\]\s+\S/;
 const CHECKED_ITEM_RE = /^\s*- \[[xX]\]\s+\S/;
+const FENCE_PARSER = parser.configure(GFM);
 
 export const isChecklistItemLine = (line: string): boolean =>
   CHECKLIST_ITEM_RE.test(line);
@@ -28,31 +31,46 @@ export const isCheckedItemLine = (line: string): boolean => CHECKED_ITEM_RE.test
  */
 export const getChecklistItemLineIndices = (lines: string[]): number[] => {
   const indices: number[] = [];
-  let fenceChar = '';
-  let fenceLength = 0;
+  let hasPossibleFence = false;
   for (let i = 0; i < lines.length; i++) {
-    const fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(lines[i].replace(/\r$/, ''));
-    if (fenceChar) {
-      if (
-        fence &&
-        fence[1][0] === fenceChar &&
-        fence[1].length >= fenceLength &&
-        fence[2].trim() === ''
-      ) {
-        fenceChar = '';
-      }
-      continue;
-    }
-    if (fence && (fence[1][0] === '~' || !fence[2].includes('`'))) {
-      fenceChar = fence[1][0];
-      fenceLength = fence[1].length;
-      continue;
-    }
+    hasPossibleFence ||= lines[i].includes('```') || lines[i].includes('~~~');
     if (isChecklistItemLine(lines[i])) {
       indices.push(i);
     }
   }
-  return indices;
+  // Progress is computed for every task row. Ordinary checklists need only the
+  // line scan; reuse the editor's existing parser only for possible fences.
+  if (!hasPossibleFence || indices.length === 0) {
+    return indices;
+  }
+
+  // Container indentation and the end of a list item determine fence lifetime.
+  // Let Lezer resolve that grammar, but retain the existing item syntax outside
+  // fences (rather than adopting all of its task-list syntax).
+  const fences: { from: number; to: number }[] = [];
+  FENCE_PARSER.parse(lines.join('\n')).iterate({
+    enter: ({ name, from, to }) => {
+      if (name === 'FencedCode') {
+        fences.push({ from, to });
+        return false;
+      }
+      return true;
+    },
+  });
+  let lineIndex = 0;
+  let lineStart = 0;
+  let fenceIndex = 0;
+  return indices.filter((index) => {
+    while (lineIndex < index) {
+      lineStart += lines[lineIndex].length + 1;
+      lineIndex++;
+    }
+    while (fenceIndex < fences.length && fences[fenceIndex].to <= lineStart) {
+      fenceIndex++;
+    }
+    const fence = fences[fenceIndex];
+    return !fence || lineStart + lines[index].length <= fence.from;
+  });
 };
 
 /**

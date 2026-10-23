@@ -1,4 +1,10 @@
+import { marked } from 'marked';
+import { markedOptionsFactory } from '../../ui/marked-options-factory';
+import { markdownLanguage } from '../../ui/inline-markdown/live-markdown/markdown-language';
+import { getChecklistProgress } from './get-checklist-progress';
+import { markdownToChecklist } from './markdown-to-checklist';
 import {
+  getChecklistItemLineIndices,
   isChecklistItemLine,
   isCheckedItemLine,
   removeCheckedChecklistItems,
@@ -110,6 +116,85 @@ describe('checklist-operations', () => {
 });
 
 describe('checklist edits around fenced code examples', () => {
+  for (const { name, prefixes } of [
+    {
+      name: 'fence indentation relative to its container',
+      prefixes: [
+        ['```', '    ```', '- [x] source', '- [ ] code', '```'],
+        ['```', '\t```', '- [x] source', '- [ ] code', '```'],
+        ['    ```'],
+        ['\t```'],
+        ['   ```', '- [x] source', '- [ ] code', '   ```'],
+        ['- parent', '    ```', '    - [x] source', '    - [ ] code', '    ```', ''],
+        ['1. parent', '     ~~~', '     - [x] source', '     ~~~', ''],
+      ],
+    },
+    {
+      name: 'fence openers and lifetime inside list items',
+      prefixes: [
+        ['- ```', '  - [x] source', '  - [ ] code', '  ```', ''],
+        ['1. ~~~', '   - [x] source', '   - [ ] code', '   ~~~', ''],
+        ['- parent', '  ```', '  - [x] source', ''],
+        ['- parent', '  ```', '  - [x] source'],
+        ['- parent', '  - ```', '    - [x] source', ''],
+      ],
+    },
+  ]) {
+    it(`matches both renderers for ${name} and preserves source`, () => {
+      marked.setOptions(marked.getDefaults());
+      marked.setOptions(markedOptionsFactory());
+      const results = prefixes.flatMap((prefix) =>
+        ['\n', '\r\n'].map((ending) => {
+          const lines = [...prefix, '- [x] done', '- [ ] todo'];
+          const notes = lines.join(ending);
+          const html = marked.parse(notes) as string;
+          const editorIndices: number[] = [];
+          markdownLanguage.parser.parse(notes).iterate({
+            enter: ({ name: nodeName, from }) => {
+              if (nodeName === 'TaskMarker') {
+                editorIndices.push(notes.slice(0, from).split('\n').length - 1);
+              }
+            },
+          });
+          const actual = {
+            notes,
+            renderedLabels: Array.from(
+              html.matchAll(/class="checkbox-label">(.*?)<\/span>/g),
+              (match) => match[1].trim(),
+            ),
+            editorIndices,
+            indices: getChecklistItemLineIndices(notes.split('\n')),
+            cleared: removeCheckedChecklistItems(notes),
+            checked: setAllChecklistItemsChecked(notes, true),
+            unchecked: setAllChecklistItemsChecked(notes, false),
+            toggled: toggleChecklistItemAtIndex(notes, 1),
+            progress: getChecklistProgress(notes),
+            converted: markdownToChecklist(notes),
+          };
+          const expected = {
+            notes,
+            renderedLabels: ['done', 'todo'],
+            editorIndices: [prefix.length, prefix.length + 1],
+            indices: [prefix.length, prefix.length + 1],
+            cleared: notes.replace(`- [x] done${ending}`, ''),
+            checked: notes.replace('- [ ] todo', '- [x] todo'),
+            unchecked: notes.replace('- [x] done', '- [ ] done'),
+            toggled: notes.replace('- [ ] todo', '- [x] todo'),
+            progress: { done: 1, total: 2 },
+            converted: [
+              { text: 'done', isChecked: true },
+              { text: 'todo', isChecked: false },
+            ],
+          };
+          return { actual, expected };
+        }),
+      );
+      expect(results.map((result) => result.actual)).toEqual(
+        results.map((result) => result.expected),
+      );
+    });
+  }
+
   for (const fence of ['```', '~~~', '````']) {
     const notes = `Intro\r\n${fence}markdown\r\n- [x] source\r\n- [ ] code\r\n${fence}\r\n- [x] done\r\n- [ ] todo\r\nEnd`;
     it(`preserves ${fence} fenced content when clearing completed items`, () => {
