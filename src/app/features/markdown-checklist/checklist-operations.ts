@@ -47,8 +47,11 @@ export const getChecklistItemLineIndices = (lines: string[]): number[] => {
   // Container indentation and the end of a list item determine fence lifetime.
   // Let Lezer resolve that grammar, including code and HTML blocks containing
   // fence-like text, but retain the existing item syntax outside those blocks.
+  // Lezer receives normalized lines, as it does in CodeMirror. Keep the original
+  // strings for editing, and use the normalized lengths for parser offsets.
+  const parserLines = lines.map((line) => line.replace(/\r$/, ''));
   const fences: { from: number; to: number }[] = [];
-  FENCE_PARSER.parse(lines.join('\n')).iterate({
+  FENCE_PARSER.parse(parserLines.join('\n')).iterate({
     enter: ({ name, from, to }) => {
       if (name === 'FencedCode' || name === 'CodeBlock' || name === 'HTMLBlock') {
         fences.push({ from, to });
@@ -62,14 +65,14 @@ export const getChecklistItemLineIndices = (lines: string[]): number[] => {
   let fenceIndex = 0;
   return indices.filter((index) => {
     while (lineIndex < index) {
-      lineStart += lines[lineIndex].length + 1;
+      lineStart += parserLines[lineIndex].length + 1;
       lineIndex++;
     }
     while (fenceIndex < fences.length && fences[fenceIndex].to <= lineStart) {
       fenceIndex++;
     }
     const fence = fences[fenceIndex];
-    return !fence || lineStart + lines[index].length <= fence.from;
+    return !fence || lineStart + parserLines[index].length <= fence.from;
   });
 };
 

@@ -135,6 +135,7 @@ describe('checklist edits around fenced code examples', () => {
         ['    ```', '    - [x] source', '    ```'],
         ['\t```', '\t- [x] source', '\t```'],
         ['<pre>', '```', '- [x] source', '```', '</pre>', ''],
+        ['<div>', '```', '- [x] source', '```', '</div>', ''],
       ],
     },
     {
@@ -157,10 +158,12 @@ describe('checklist edits around fenced code examples', () => {
           const notes = lines.join(ending);
           const html = marked.parse(notes) as string;
           const editorIndices: number[] = [];
-          markdownLanguage.parser.parse(notes).iterate({
+          // CodeMirror's document normalizes CRLF before invoking its parser.
+          const editorSource = notes.replace(/\r\n/g, '\n');
+          markdownLanguage.parser.parse(editorSource).iterate({
             enter: ({ name: nodeName, from }) => {
               if (nodeName === 'TaskMarker') {
-                editorIndices.push(notes.slice(0, from).split('\n').length - 1);
+                editorIndices.push(editorSource.slice(0, from).split('\n').length - 1);
               }
             },
           });
