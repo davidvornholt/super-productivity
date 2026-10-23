@@ -71,8 +71,83 @@ test('double-clicking an issue add button creates one linked task', async ({
 }) => {
   await workViewPage.waitForTaskList();
   await setup(page);
-  await page.locator('issue-preview-item').getByRole('button').first().dblclick();
-  await expect.poll(async () => (await linked(page)).length).toBe(1);
+  // The optimized E2E build has no ng.getComponent. Locate the instantiated
+  // service through the existing store helper; keep this probe local to this test.
+  const imports = await page.evaluateHandle(() => {
+    type ImportService = {
+      addTaskFromIssue: (...args: unknown[]) => Promise<unknown>;
+      _taskService: { _taskArchiveService: { load: () => Promise<unknown> } };
+    };
+    const store = (
+      window as unknown as {
+        __e2eTestHelpers: {
+          store: { injector: { records: Map<unknown, { value: unknown } | null> } };
+        };
+      }
+    ).__e2eTestHelpers.store;
+    const service = [...store.injector.records.values()]
+      .map((record) => record?.value)
+      .find(
+        (value): value is ImportService =>
+          !!value && typeof (value as ImportService).addTaskFromIssue === 'function',
+      );
+    if (!service) throw new Error('IssueService instance not found');
+    const pending: Promise<unknown>[] = [];
+    let settled = 0;
+    let archiveLoads = 0;
+    let maxActive = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const archive = service._taskService._taskArchiveService;
+    const originalLoad = archive.load;
+    archive.load = async () => {
+      archiveLoads++;
+      const result = await originalLoad.call(archive);
+      await gate;
+      return result;
+    };
+    const originalImport = service.addTaskFromIssue;
+    service.addTaskFromIssue = (...args) => {
+      const promise = originalImport.apply(service, args).finally(() => {
+        settled++;
+      });
+      pending.push(promise);
+      maxActive = Math.max(maxActive, pending.length - settled);
+      return promise;
+    };
+    return {
+      status: () => ({ calls: pending.length, ready: settled + archiveLoads, maxActive }),
+      finish: () => {
+        release();
+        return Promise.allSettled(pending);
+      },
+      restore: () => {
+        release();
+        archive.load = originalLoad;
+        service.addTaskFromIssue = originalImport;
+      },
+    };
+  });
+  try {
+    await page.locator('issue-preview-item').getByRole('button').first().dblclick();
+    // Each call must either reach the held archive read or settle (the guard's
+    // early return). Holding the first read guarantees the clicks overlap.
+    await expect
+      .poll(() => imports.evaluate((probe) => probe.status()))
+      .toEqual({
+        calls: 2,
+        ready: 2,
+        maxActive: 2,
+      });
+    const results = await imports.evaluate((probe) => probe.finish());
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+  } finally {
+    await imports.evaluate((probe) => probe.restore());
+    await imports.dispose();
+  }
+  expect((await linked(page)).length).toBe(1);
   await flush(page);
   await page.reload();
   await workViewPage.waitForTaskList();
