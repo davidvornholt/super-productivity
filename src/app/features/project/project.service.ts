@@ -57,6 +57,7 @@ import { getDeadlineAutoPlanFields } from '../tasks/util/get-deadline-auto-plan-
 import { MenuTreeService } from '../menu-tree/menu-tree.service';
 import { selectMenuTreeProjectTree } from '../menu-tree/store/menu-tree.selectors';
 import { TaskTimeSyncService } from '../tasks/task-time-sync.service';
+import { updateTaskRepeatCfg } from '../task-repeat-cfg/store/task-repeat-cfg.actions';
 
 export interface ProjectCompletionInfo {
   topLevelTasks: Task[];
@@ -240,12 +241,16 @@ export class ProjectService {
   /**
    * Carry unfinished work forward into the Inbox before completing a project.
    * Uses the normal per-task move action so every downstream effect (issue
-   * sync, reminders, repeat-cfg) and per-entity conflict detection fires
-   * naturally. Done tasks are explicitly re-opened (setUnDone) so carried-over
+   * sync, reminders) and per-entity conflict detection fires naturally.
+   * A recurring task's repeat config moves to the Inbox with it, like a menu
+   * move: the completed project would suspend it, and deleting the project
+   * would delete it. Its done instances stay with the completed project.
+   * Done tasks are explicitly re-opened (setUnDone) so carried-over
    * work is actionable again in the Inbox — the move itself keeps isDone.
    * The trailing flush is the bulk-dispatch guard (sync-model Rule #6).
    */
   async moveTasksToInbox(tasks: Task[]): Promise<void> {
+    const movedRepeatCfgIds = new Set<string>();
     for (const task of tasks) {
       const withSubTasks = await firstValueFrom(
         this._taskService.getByIdWithSubTaskData$(task.id),
@@ -253,6 +258,18 @@ export class ProjectService {
       // Skip tasks that vanished from the store mid-loop (#9946).
       if (!withSubTasks) {
         continue;
+      }
+      if (withSubTasks.repeatCfgId && !movedRepeatCfgIds.has(withSubTasks.repeatCfgId)) {
+        this._store$.dispatch(
+          updateTaskRepeatCfg({
+            taskRepeatCfg: {
+              id: withSubTasks.repeatCfgId,
+              changes: { projectId: INBOX_PROJECT.id },
+            },
+            isAskToUpdateAllTaskInstances: false,
+          }),
+        );
+        movedRepeatCfgIds.add(withSubTasks.repeatCfgId);
       }
       this._taskService.moveToProject(withSubTasks, INBOX_PROJECT.id);
       if (task.isDone) {
