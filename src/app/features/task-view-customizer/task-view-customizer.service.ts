@@ -37,6 +37,7 @@ import { LS } from '../../core/persistence/storage-keys.const';
 import { LanguageService } from 'src/app/core/language/language.service';
 import { TranslateService } from '@ngx-translate/core';
 import { T } from '../../t.const';
+import { DateService } from '../../core/date/date.service';
 import { parseDbDateStr } from '../../util/parse-db-date-str';
 
 const GROUP_OPTIONS_NO_PROJECT = OPTIONS.group.list.filter(
@@ -83,6 +84,7 @@ export class TaskViewCustomizerService {
   private store = inject(Store);
   private _workContextService = inject(WorkContextService);
   private _dateAdapter = inject(DateAdapter);
+  private _dateService = inject(DateService);
   private _projectService = inject(ProjectService);
   private _tagService = inject(TagService);
   private _menuTreeService = inject(MenuTreeService);
@@ -648,14 +650,21 @@ export class TaskViewCustomizerService {
       });
     }
 
-    const today = new Date();
+    const today = this._dateService.getLogicalTodayDate();
+    const startOfNextDayDiffMs = this._dateService.getStartOfNextDayDiffMs();
     const firstDayOfWeek = this._dateAdapter.getFirstDayOfWeek();
     const todayStr = getDbDateStr(today);
-    const tomorrowStr = getDbDateStr(new Date(new Date().setDate(today.getDate() + 1)));
+    const tomorrowStr = getDbDateStr(
+      new Date(new Date(today).setDate(today.getDate() + 1)),
+    );
 
     return tasks.filter((task) => {
       const [day, withTime] = getFields(task);
-      const dateStr = day ? day : withTime ? getDbDateStr(withTime) : null;
+      const dateStr = day
+        ? day
+        : withTime
+          ? getDbDateStr(withTime - startOfNextDayDiffMs)
+          : null;
       if (!dateStr) return false;
 
       switch (value) {
@@ -663,27 +672,40 @@ export class TaskViewCustomizerService {
           return dateStr.startsWith(todayStr);
         case FILTER_SCHEDULE.tomorrow:
           return dateStr.startsWith(tomorrowStr);
-        case FILTER_SCHEDULE.thisWeek: {
-          const weekRange = getWeekRange(today, firstDayOfWeek);
-          return (
-            dateStr >= getDbDateStr(weekRange.start) &&
-            dateStr <= getDbDateStr(weekRange.end)
-          );
-        }
+        case FILTER_SCHEDULE.thisWeek:
         case FILTER_SCHEDULE.nextWeek: {
-          const nextWeekStart = new Date(new Date().setDate(today.getDate() + 7));
-          const weekRange = getWeekRange(nextWeekStart, firstDayOfWeek);
-          return (
-            dateStr >= getDbDateStr(weekRange.start) &&
-            dateStr <= getDbDateStr(weekRange.end)
+          // Preserve the existing midnight-boundary behavior; this correction
+          // only changes filters that use a custom logical day.
+          if (startOfNextDayDiffMs === 0) {
+            const relativeDate = new Date(today);
+            if (value === FILTER_SCHEDULE.nextWeek) {
+              relativeDate.setDate(today.getDate() + 7);
+            }
+            const weekRange = getWeekRange(relativeDate, firstDayOfWeek);
+            return (
+              dateStr >= getDbDateStr(weekRange.start) &&
+              dateStr <= getDbDateStr(weekRange.end)
+            );
+          }
+          // Logical today already has the correct local calendar date; applying
+          // another timezone offset can move it into the previous week.
+          const weekStart = new Date(today);
+          const daysSinceWeekStart = (today.getDay() - firstDayOfWeek + 7) % 7;
+          weekStart.setDate(
+            today.getDate() -
+              daysSinceWeekStart +
+              (value === FILTER_SCHEDULE.nextWeek ? 7 : 0),
           );
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekStart.getDate() + 6);
+          return dateStr >= getDbDateStr(weekStart) && dateStr <= getDbDateStr(weekEnd);
         }
         case FILTER_SCHEDULE.thisMonth: {
           const yearMonth = getDbDateStr(today).substring(0, 7);
           return dateStr.startsWith(yearMonth);
         }
         case FILTER_SCHEDULE.nextMonth: {
-          const nextMonth = new Date(new Date().setDate(1));
+          const nextMonth = new Date(new Date(today).setDate(1));
           nextMonth.setMonth(nextMonth.getMonth() + 1);
           const yearMonth = getDbDateStr(nextMonth).substring(0, 7);
           return dateStr.startsWith(yearMonth);
