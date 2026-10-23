@@ -22,6 +22,7 @@ export class TaskDuplicateService {
       isDone: false,
       projectId: task.projectId || undefined,
       tagIds: task.tagIds || [],
+      attachments: task.attachments,
       ...(task.notes && { notes: task.notes }),
       ...(task.priority !== undefined && { priority: task.priority }),
     };
@@ -52,6 +53,7 @@ export class TaskDuplicateService {
           ...(subTask.dueWithTime && { dueWithTime: subTask.dueWithTime }),
           timeEstimate: subTask.timeEstimate,
           notes: subTask.notes,
+          attachments: subTask.attachments,
           ...(subTask.priority !== undefined && { priority: subTask.priority }),
         },
       });
