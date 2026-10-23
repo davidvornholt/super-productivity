@@ -175,6 +175,29 @@ describe('TaskDuplicateService', () => {
     );
   });
 
+  it('keeps timed parent and all-day child deadlines', () => {
+    const deadlineWithTime = 1_907_928_000_000;
+    const deadlineRemindAt = deadlineWithTime - 900_000;
+    taskService.add.and.returnValue('new-parent-task');
+    taskService.createNewTaskWithDefaults.and.returnValue({
+      ...subTask,
+      id: 'copy-child',
+    });
+    service.duplicate({
+      ...parentTask,
+      deadlineWithTime,
+      deadlineRemindAt,
+      subTasks: [{ ...subTask, deadlineDay: '2030-06-17' }],
+      subTaskIds: [subTask.id],
+    });
+    expect(taskService.add.calls.mostRecent().args[2]).toEqual(
+      jasmine.objectContaining({ deadlineWithTime, deadlineRemindAt }),
+    );
+    expect(
+      taskService.createNewTaskWithDefaults.calls.mostRecent().args[0].additional,
+    ).toEqual(jasmine.objectContaining({ deadlineDay: '2030-06-17' }));
+  });
+
   it('keeps the priority of the task and of each subtask', () => {
     const prioritizedSubTask: Task = { ...subTask, id: 'sub-high', priority: 3 };
     const unprioritizedSubTask: Task = { ...subTask, id: 'sub-none', priority: null };
