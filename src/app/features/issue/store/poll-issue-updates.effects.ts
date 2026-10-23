@@ -19,6 +19,7 @@ import {
 } from '../../tasks/store/task.selectors';
 import { IssueLog } from '../../../core/log';
 import { getRefreshOnLook$ } from './refresh-on-look';
+import { skipDuringSyncWindow } from '../../../util/skip-during-sync-window.operator';
 
 @Injectable()
 export class PollIssueUpdatesEffects {
@@ -26,6 +27,7 @@ export class PollIssueUpdatesEffects {
   private _actions$ = inject(LOCAL_ACTIONS);
   private readonly _issueService = inject(IssueService);
   private readonly _workContextService = inject(WorkContextService);
+  private readonly _skipDuringSyncWindow = skipDuringSyncWindow<unknown>();
 
   pollIssueTaskUpdatesActions$: Observable<unknown> = this._actions$.pipe(
     ofType(setActiveWorkContext, loadAllData),
@@ -33,12 +35,12 @@ export class PollIssueUpdatesEffects {
 
   /**
    * Polls issue updates for providers scoped to the current work context.
-   * Restarts on every context switch or data load.
+   * Restarts on context, data load or provider configuration changes.
    */
   pollIssueChangesForCurrentContext$: Observable<unknown> = createEffect(
     () =>
       this.pollIssueTaskUpdatesActions$.pipe(
-        switchMap(() => this._store.select(selectEnabledIssueProviders).pipe(first())),
+        switchMap(() => this._store.select(selectEnabledIssueProviders)),
         switchMap((enabledProviders: IssueProvider[]) => {
           const providers = enabledProviders.filter(
             (provider) =>
@@ -105,6 +107,9 @@ export class PollIssueUpdatesEffects {
       ),
       getRefreshOnLook$(provider),
     ).pipe(
+      // The timers retry; a configuration change during replay must not
+      // cause a poll to emit local updates inside the sync window.
+      this._skipDuringSyncWindow,
       switchMap(() => this._getTasksForProvider(provider)),
       switchMap((issueTasks: Task[]) => {
         if (issueTasks.length === 0) {

@@ -16,6 +16,8 @@ import {
 import { ICAL_TYPE, GITHUB_TYPE, JIRA_TYPE } from '../issue.const';
 import { Task, TaskWithSubTasks } from '../../tasks/task.model';
 import { IssueProvider } from '../issue.model';
+import { HydrationStateService } from '../../../op-log/apply/hydration-state.service';
+import { SyncTriggerService } from '../../../imex/sync/sync-trigger.service';
 
 describe('PollIssueUpdatesEffects', () => {
   let effects: PollIssueUpdatesEffects;
@@ -85,6 +87,8 @@ describe('PollIssueUpdatesEffects', () => {
         }),
         { provide: IssueService, useValue: issueServiceSpy },
         { provide: WorkContextService, useValue: workContextServiceSpy },
+        { provide: HydrationStateService, useValue: { isInSyncWindow: () => false } },
+        { provide: SyncTriggerService, useValue: { isInitialSyncDoneSync: () => true } },
       ],
     });
 
@@ -97,6 +101,59 @@ describe('PollIssueUpdatesEffects', () => {
   });
 
   describe('pollIssueChangesForCurrentContext$', () => {
+    it('stops a running timer when the provider is disabled and restarts when enabled', fakeAsync(() => {
+      const provider = createMockIssueProvider({ id: 'cal-provider-1' });
+      const task = createMockTask({ issueId: 'issue-1', issueProviderId: provider.id });
+      const enabled = store.overrideSelector(selectEnabledIssueProviders, [provider]);
+      store.overrideSelector(selectAllCalendarIssueTasks, [task]);
+      const actionsSubject = new Subject<ReturnType<typeof setActiveWorkContext>>();
+      actions$ = actionsSubject;
+      const sub = effects.pollIssueChangesForCurrentContext$.subscribe();
+      actionsSubject.next(
+        setActiveWorkContext({
+          activeType: WorkContextType.PROJECT,
+          activeId: 'project-1',
+        }),
+      );
+      tick(10001);
+      expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
+      enabled.setResult([]);
+      store.refreshState();
+      tick(600001);
+      expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
+      enabled.setResult([provider]);
+      store.refreshState();
+      tick(10001);
+      expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(2);
+      sub.unsubscribe();
+    }));
+
+    it('skips a poll during remote replay and retries after the sync window', fakeAsync(() => {
+      const provider = createMockIssueProvider();
+      const task = createMockTask({ issueId: 'issue-1', issueProviderId: provider.id });
+      store.overrideSelector(selectEnabledIssueProviders, [provider]);
+      store.overrideSelector(selectAllCalendarIssueTasks, [task]);
+      const inSyncWindow = spyOn(
+        TestBed.inject(HydrationStateService),
+        'isInSyncWindow',
+      ).and.returnValue(true);
+      const actionsSubject = new Subject<ReturnType<typeof setActiveWorkContext>>();
+      actions$ = actionsSubject;
+      const sub = effects.pollIssueChangesForCurrentContext$.subscribe();
+      actionsSubject.next(
+        setActiveWorkContext({
+          activeType: WorkContextType.PROJECT,
+          activeId: 'project-1',
+        }),
+      );
+      tick(10001);
+      expect(issueServiceSpy.refreshIssueTasks).not.toHaveBeenCalled();
+      inSyncWindow.and.returnValue(false);
+      tick(600000);
+      expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
+      sub.unsubscribe();
+    }));
+
     it('should trigger polling when setActiveWorkContext action is dispatched', fakeAsync(() => {
       const calendarProvider = createMockIssueProvider({
         id: 'cal-provider-1',
