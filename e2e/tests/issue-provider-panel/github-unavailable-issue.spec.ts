@@ -140,20 +140,54 @@ test.describe('GitHub refresh preserves local work', () => {
       await flush(page);
       const before = await readTasks(page);
       expect(before).toHaveLength(2);
+      const retainedContent = (tasks: Task[]): Partial<Task>[] =>
+        tasks
+          .map((t) => ({
+            id: t.id,
+            title: t.title,
+            notes: t.notes,
+            timeEstimate: t.timeEstimate,
+            timeSpent: t.timeSpent,
+            parentId: t.parentId,
+            subTaskIds: t.subTaskIds,
+            issueId: t.issueId,
+            issueProviderId: t.issueProviderId,
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+      const warning = page.locator('snack-custom .wrapper.warning');
+      const warningText = `Remote issue was deleted. Delete linked task "${before.find((t) => t.id === id)!.title}"?`;
+      const deleteButton = warning.getByRole('button', { name: 'Delete', exact: true });
       missing = true;
       await refresh(page, id);
       await expect.poll(() => missingRequests).toBeGreaterThan(0);
-      // Allow the real HTTP rejection and adapter deletion branch to settle.
-      await page.waitForTimeout(1000);
-      expect((await readTasks(page)).map((t) => t.id).sort()).toEqual(
-        before.map((t) => t.id).sort(),
-      );
+      // The rendered warning proves the adapter handled the HTTP rejection.
+      await expect(warning.locator('.message')).toHaveText(warningText);
+      await expect(deleteButton).toBeVisible();
+      await warning.getByRole('button', { name: 'Dismiss', exact: true }).click();
+      await expect(warning).toBeHidden();
+      expect(retainedContent(await readTasks(page))).toEqual(retainedContent(before));
       await flush(page);
       await page.reload();
       await workViewPage.waitForTaskList();
-      const after = await readTasks(page);
-      expect(after.map((t) => t.id).sort()).toEqual(before.map((t) => t.id).sort());
-      expect(after.find((t) => t.id === id)?.notes).toBe('Local investigation — 日本語');
+      await expect
+        .poll(async () => retainedContent(await readTasks(page)))
+        .toEqual(retainedContent(before));
+
+      // Plugin registration can finish after task hydration on reload.
+      await page.locator('.e2e-toggle-issue-provider-panel').click();
+      await page.locator('issue-panel .mat-mdc-tab').last().click();
+      await expect(
+        page.getByRole('button', { name: 'GitHub Issues', exact: true }),
+      ).toBeVisible();
+      await page.locator('.e2e-toggle-issue-provider-panel').click();
+      await refresh(page, id);
+      await expect(warning.locator('.message')).toHaveText(warningText);
+      await expect(deleteButton).toBeVisible();
+      await deleteButton.click();
+      await expect.poll(() => readTasks(page)).toEqual([]);
+      for (const task of before) {
+        await expect(page.locator(`task[data-task-id="${task.id}"]`)).toHaveCount(0);
+      }
     });
   }
 });

@@ -598,6 +598,8 @@ export class PluginIssueProviderAdapterService implements IssueServiceInterface 
         ico: 'delete_forever',
         actionStr: T.G.DELETE,
         actionFn: () => this._removeIfIssueStillMatches(currentTask),
+        // Keep the action visible through the manual refresh's "no update" snack.
+        config: { duration: 0 },
       });
     });
   }
