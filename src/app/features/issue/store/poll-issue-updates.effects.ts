@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { createEffect, ofType } from '@ngrx/effects';
 import { LOCAL_ACTIONS } from '../../../util/local-actions.token';
-import { EMPTY, from, merge, Observable, timer } from 'rxjs';
+import { EMPTY, from, merge, Observable, of, timer } from 'rxjs';
 import { catchError, first, map, switchMap } from 'rxjs/operators';
 import { IssueService } from '../issue.service';
 import { Task, TaskWithSubTasks } from '../../tasks/task.model';
@@ -20,6 +20,8 @@ import {
 import { IssueLog } from '../../../core/log';
 import { getRefreshOnLook$ } from './refresh-on-look';
 import { skipDuringSyncWindow } from '../../../util/skip-during-sync-window.operator';
+import { HydrationStateService } from '../../../op-log/apply/hydration-state.service';
+import { SyncTriggerService } from '../../../imex/sync/sync-trigger.service';
 
 @Injectable()
 export class PollIssueUpdatesEffects {
@@ -27,6 +29,8 @@ export class PollIssueUpdatesEffects {
   private _actions$ = inject(LOCAL_ACTIONS);
   private readonly _issueService = inject(IssueService);
   private readonly _workContextService = inject(WorkContextService);
+  private readonly _hydrationState = inject(HydrationStateService);
+  private readonly _syncTriggerService = inject(SyncTriggerService);
   private readonly _skipDuringSyncWindow = skipDuringSyncWindow<unknown>();
 
   pollIssueTaskUpdatesActions$: Observable<unknown> = this._actions$.pipe(
@@ -100,15 +104,27 @@ export class PollIssueUpdatesEffects {
   );
 
   private _createUpdatePollTimer(provider: IssueProvider): Observable<unknown> {
-    return merge(
-      timer(
-        DELAY_BEFORE_ISSUE_POLLING,
-        this._issueService.getPollInterval(provider.issueProviderKey),
+    return this._syncTriggerService.afterInitialSyncDoneStrict$.pipe(
+      first(),
+      switchMap(() =>
+        merge(
+          timer(
+            DELAY_BEFORE_ISSUE_POLLING,
+            this._issueService.getPollInterval(provider.issueProviderKey),
+          ),
+          getRefreshOnLook$(provider),
+        ),
       ),
-      getRefreshOnLook$(provider),
-    ).pipe(
-      // The timers retry; a configuration change during replay must not
-      // cause a poll to emit local updates inside the sync window.
+      // Preserve one pending startup/look refresh, cancelled with this provider's
+      // timer. Unlike waitForSyncWindow, this must not time out into active replay.
+      switchMap(() =>
+        this._hydrationState.isInSyncWindow()
+          ? this._hydrationState.isInSyncWindow$.pipe(
+              // The observable can replay a stale value in the same event turn.
+              first(() => !this._hydrationState.isInSyncWindow()),
+            )
+          : of(false),
+      ),
       this._skipDuringSyncWindow,
       switchMap(() => this._getTasksForProvider(provider)),
       switchMap((issueTasks: Task[]) => {

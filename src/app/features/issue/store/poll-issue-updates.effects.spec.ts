@@ -1,7 +1,7 @@
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { provideMockActions } from '@ngrx/effects/testing';
 import { MockStore, provideMockStore } from '@ngrx/store/testing';
-import { Observable, of, Subject } from 'rxjs';
+import { BehaviorSubject, filter, Observable, of, Subject } from 'rxjs';
 import { PollIssueUpdatesEffects } from './poll-issue-updates.effects';
 import { IssueService } from '../issue.service';
 import { WorkContextService } from '../../work-context/work-context.service';
@@ -13,7 +13,13 @@ import {
   selectAllCalendarIssueTasks,
   selectAllTasks,
 } from '../../tasks/store/task.selectors';
-import { ICAL_TYPE, GITHUB_TYPE, JIRA_TYPE } from '../issue.const';
+import {
+  DELAY_BEFORE_ISSUE_POLLING,
+  ICAL_TYPE,
+  GITHUB_TYPE,
+  JIRA_TYPE,
+  PLAINSPACE_TYPE,
+} from '../issue.const';
 import { Task, TaskWithSubTasks } from '../../tasks/task.model';
 import { IssueProvider } from '../issue.model';
 import { HydrationStateService } from '../../../op-log/apply/hydration-state.service';
@@ -25,6 +31,7 @@ describe('PollIssueUpdatesEffects', () => {
   let store: MockStore;
   let issueServiceSpy: jasmine.SpyObj<IssueService>;
   let workContextServiceSpy: jasmine.SpyObj<WorkContextService>;
+  let initialSyncDone$: BehaviorSubject<boolean>;
 
   const createMockTask = (overrides: Partial<Task> = {}): Task =>
     ({
@@ -58,6 +65,7 @@ describe('PollIssueUpdatesEffects', () => {
     }) as IssueProvider;
 
   beforeEach(() => {
+    initialSyncDone$ = new BehaviorSubject(true);
     issueServiceSpy = jasmine.createSpyObj('IssueService', [
       'getPollInterval',
       'refreshIssueTasks',
@@ -70,7 +78,7 @@ describe('PollIssueUpdatesEffects', () => {
     // Default: calendar poll interval is 10 minutes
     issueServiceSpy.getPollInterval.and.callFake((providerKey: string) => {
       if (providerKey === ICAL_TYPE) return 600000; // 10 minutes
-      if (providerKey === GITHUB_TYPE) return 300000; // 5 minutes
+      if (providerKey === GITHUB_TYPE || providerKey === PLAINSPACE_TYPE) return 300000; // 5 minutes
       return 0;
     });
 
@@ -87,8 +95,14 @@ describe('PollIssueUpdatesEffects', () => {
         }),
         { provide: IssueService, useValue: issueServiceSpy },
         { provide: WorkContextService, useValue: workContextServiceSpy },
-        { provide: HydrationStateService, useValue: { isInSyncWindow: () => false } },
-        { provide: SyncTriggerService, useValue: { isInitialSyncDoneSync: () => true } },
+        HydrationStateService,
+        {
+          provide: SyncTriggerService,
+          useValue: {
+            isInitialSyncDoneSync: () => initialSyncDone$.value,
+            afterInitialSyncDoneStrict$: initialSyncDone$.pipe(filter(Boolean)),
+          },
+        },
       ],
     });
 
@@ -98,6 +112,87 @@ describe('PollIssueUpdatesEffects', () => {
 
   afterEach(() => {
     store.resetSelectors();
+  });
+
+  describe('pending refresh across a sync window', () => {
+    for (const { trigger, disable, initialSyncPending, windowMs } of [
+      { trigger: 'startup', disable: false, initialSyncPending: false, windowMs: 1000 },
+      { trigger: 'look', disable: false, initialSyncPending: false, windowMs: 2000 },
+      { trigger: 'startup', disable: true, initialSyncPending: false, windowMs: 1000 },
+      { trigger: 'look', disable: true, initialSyncPending: false, windowMs: 2000 },
+      { trigger: 'startup', disable: false, initialSyncPending: false, windowMs: 31000 },
+      { trigger: 'startup', disable: false, initialSyncPending: true, windowMs: 1000 },
+      { trigger: 'startup', disable: true, initialSyncPending: true, windowMs: 1000 },
+    ]) {
+      it(`${trigger}: disable=${disable}, initial sync pending=${initialSyncPending}, window=${windowMs}ms`, fakeAsync(() => {
+        const provider = createMockIssueProvider({
+          issueProviderKey: PLAINSPACE_TYPE,
+          pollingMode: trigger === 'look' ? 'always' : 'whenProjectOpen',
+        });
+        const task = createMockTask({ issueId: 'issue-1', issueProviderId: provider.id });
+        const enabled = store.overrideSelector(selectEnabledIssueProviders, [provider]);
+        store.overrideSelector(selectAllTasks, [task]);
+        Object.defineProperty(workContextServiceSpy, 'allTasksForCurrentContext$', {
+          get: () => of([{ ...task, subTasks: [] }]),
+        });
+        initialSyncDone$.next(!initialSyncPending);
+        const hydration = TestBed.inject(HydrationStateService);
+        const actionsSubject = new Subject<ReturnType<typeof setActiveWorkContext>>();
+        actions$ = actionsSubject;
+        const sub = (
+          trigger === 'look'
+            ? effects.pollIssueChangesAlways$
+            : effects.pollIssueChangesForCurrentContext$
+        ).subscribe();
+        actionsSubject.next(
+          setActiveWorkContext({
+            activeType: WorkContextType.PROJECT,
+            activeId: 'project-1',
+          }),
+        );
+        // Publish the closed signal before opening the window: its observable
+        // can still replay that old value within the visibility event's turn.
+        TestBed.tick();
+        if (trigger === 'look') {
+          tick(DELAY_BEFORE_ISSUE_POLLING);
+          expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
+          issueServiceSpy.refreshIssueTasks.calls.reset();
+          spyOnProperty(document, 'visibilityState', 'get').and.returnValue('visible');
+          // SyncTriggerService's constructor opens this synchronously before
+          // the look listener, even with app sync disabled. No sync follows,
+          // so the real hydration service's 2s failsafe closes the window.
+          hydration.openSyncWindow();
+          document.dispatchEvent(new Event('visibilitychange'));
+        } else {
+          hydration.startApplyingRemoteOps();
+          tick(DELAY_BEFORE_ISSUE_POLLING);
+        }
+        expect(issueServiceSpy.refreshIssueTasks).not.toHaveBeenCalled();
+        TestBed.tick();
+        if (disable) {
+          enabled.setResult([]);
+          store.refreshState();
+        }
+        tick(windowMs - 1);
+        TestBed.tick();
+        expect(issueServiceSpy.refreshIssueTasks).not.toHaveBeenCalled();
+        tick(1);
+        if (trigger === 'startup') {
+          hydration.endApplyingRemoteOps();
+        }
+        TestBed.tick();
+        tick();
+        if (initialSyncPending) {
+          expect(issueServiceSpy.refreshIssueTasks).not.toHaveBeenCalled();
+          initialSyncDone$.next(true);
+          tick(DELAY_BEFORE_ISSUE_POLLING);
+          TestBed.tick();
+          tick();
+        }
+        expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(disable ? 0 : 1);
+        sub.unsubscribe();
+      }));
+    }
   });
 
   describe('pollIssueChangesForCurrentContext$', () => {
@@ -125,32 +220,6 @@ describe('PollIssueUpdatesEffects', () => {
       store.refreshState();
       tick(10001);
       expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(2);
-      sub.unsubscribe();
-    }));
-
-    it('skips a poll during remote replay and retries after the sync window', fakeAsync(() => {
-      const provider = createMockIssueProvider();
-      const task = createMockTask({ issueId: 'issue-1', issueProviderId: provider.id });
-      store.overrideSelector(selectEnabledIssueProviders, [provider]);
-      store.overrideSelector(selectAllCalendarIssueTasks, [task]);
-      const inSyncWindow = spyOn(
-        TestBed.inject(HydrationStateService),
-        'isInSyncWindow',
-      ).and.returnValue(true);
-      const actionsSubject = new Subject<ReturnType<typeof setActiveWorkContext>>();
-      actions$ = actionsSubject;
-      const sub = effects.pollIssueChangesForCurrentContext$.subscribe();
-      actionsSubject.next(
-        setActiveWorkContext({
-          activeType: WorkContextType.PROJECT,
-          activeId: 'project-1',
-        }),
-      );
-      tick(10001);
-      expect(issueServiceSpy.refreshIssueTasks).not.toHaveBeenCalled();
-      inSyncWindow.and.returnValue(false);
-      tick(600000);
-      expect(issueServiceSpy.refreshIssueTasks).toHaveBeenCalledTimes(1);
       sub.unsubscribe();
     }));
 
