@@ -742,6 +742,8 @@ const _removeMissingTasksFromListsOrRestoreFromArchive = (
 
     const origTaskIdsLen = projectItem.taskIds.length;
     projectItem.taskIds = projectItem.taskIds.filter((id: string): boolean => {
+      // A live task wins over a stale archived copy. Only restore missing tasks.
+      if (taskIdSet.has(id)) return true;
       if (archiveYoungIdSet.has(id) || archiveOldIdSet.has(id)) {
         taskIdsToRestoreFromArchive.push(id);
         return true;
@@ -753,6 +755,7 @@ const _removeMissingTasksFromListsOrRestoreFromArchive = (
     const origBacklogLen = projectItem.backlogTaskIds.length;
     projectItem.backlogTaskIds = projectItem.backlogTaskIds.filter(
       (id: string): boolean => {
+        if (taskIdSet.has(id)) return true;
         if (archiveYoungIdSet.has(id) || archiveOldIdSet.has(id)) {
           taskIdsToRestoreFromArchive.push(id);
           return true;

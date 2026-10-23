@@ -1,7 +1,12 @@
 import { createAppDataCompleteMock } from '../../util/app-data-mock';
 import { dataRepair } from './data-repair';
 import { fakeEntityStateFromArray } from '../../util/fake-entity-state-from-array';
-import { DEFAULT_TASK, Task, TaskArchive } from '../../features/tasks/task.model';
+import {
+  DEFAULT_TASK,
+  Task,
+  TaskArchive,
+  TaskState,
+} from '../../features/tasks/task.model';
 import { createEmptyEntity } from '../../util/create-empty-entity';
 import { Tag, TagState } from '../../features/tag/tag.model';
 import { Project, ProjectState } from '../../features/project/project.model';
@@ -133,6 +138,49 @@ describe('dataRepair()', () => {
     expect(result.data.archiveYoung.task.ids).toEqual([]);
     expect(Object.keys(result.data.archiveYoung.task.entities)).toEqual([]);
   });
+
+  for (const archive of ['archiveYoung', 'archiveOld'] as const) {
+    for (const list of ['taskIds', 'backlogTaskIds'] as const) {
+      it(`keeps the active ${list} task over a stale ${archive} copy`, () => {
+        const current: Task = {
+          ...DEFAULT_TASK,
+          id: 'CURRENT_TASK',
+          projectId: FAKE_PROJECT_ID,
+          notes: 'Current synthetic notes',
+          timeSpent: 600000,
+          timeSpentOnDay: { ['2026-06-16']: 600000 },
+          deadlineDay: '2026-06-17',
+        };
+        mock.task = {
+          ...mock.task,
+          ...fakeEntityStateFromArray<Task>([current]),
+        } as TaskState;
+        mock.project.entities[FAKE_PROJECT_ID] = {
+          ...mock.project.entities[FAKE_PROJECT_ID]!,
+          [list]: [current.id],
+        };
+        mock[archive].task = fakeEntityStateFromArray<Task>([
+          {
+            ...current,
+            notes: 'Older synthetic notes',
+            timeSpent: 0,
+            timeSpentOnDay: {},
+            isDone: true,
+          },
+        ]) as TaskArchive;
+
+        const repaired = dataRepair(mock).data;
+
+        expect(repaired.task.entities[current.id]).toEqual(current);
+        expect(repaired.task.ids).toEqual([current.id]);
+        expect(repaired[archive].task.ids).toEqual([]);
+        expect(repaired[archive].task.entities[current.id]).toBeUndefined();
+        expect(mock[archive].task.entities[current.id]!.notes).toBe(
+          'Older synthetic notes',
+        );
+      });
+    }
+  }
 
   it('should delete missing tasks for tags today list', () => {
     const taskState = {
