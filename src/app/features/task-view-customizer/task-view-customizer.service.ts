@@ -10,7 +10,6 @@ import { Tag } from '../tag/tag.model';
 import { TODAY_TAG } from '../tag/tag.const';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { getDbDateStr } from '../../util/get-db-date-str';
-import { getWeekRange } from '../../util/get-week-range';
 import { WorkContextService } from '../work-context/work-context.service';
 import { WorkContextType } from '../work-context/work-context.model';
 import { ProjectService } from '../project/project.service';
@@ -672,20 +671,20 @@ export class TaskViewCustomizerService {
           return dateStr.startsWith(todayStr);
         case FILTER_SCHEDULE.tomorrow:
           return dateStr.startsWith(tomorrowStr);
-        case FILTER_SCHEDULE.thisWeek: {
-          const weekRange = getWeekRange(today, firstDayOfWeek);
-          return (
-            dateStr >= getDbDateStr(weekRange.start) &&
-            dateStr <= getDbDateStr(weekRange.end)
-          );
-        }
+        case FILTER_SCHEDULE.thisWeek:
         case FILTER_SCHEDULE.nextWeek: {
-          const nextWeekStart = new Date(new Date(today).setDate(today.getDate() + 7));
-          const weekRange = getWeekRange(nextWeekStart, firstDayOfWeek);
-          return (
-            dateStr >= getDbDateStr(weekRange.start) &&
-            dateStr <= getDbDateStr(weekRange.end)
+          // Logical today already has the correct local calendar date; applying
+          // another timezone offset can move it into the previous week.
+          const weekStart = new Date(today);
+          const daysSinceWeekStart = (today.getDay() - firstDayOfWeek + 7) % 7;
+          weekStart.setDate(
+            today.getDate() -
+              daysSinceWeekStart +
+              (value === FILTER_SCHEDULE.nextWeek ? 7 : 0),
           );
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekStart.getDate() + 6);
+          return dateStr >= getDbDateStr(weekStart) && dateStr <= getDbDateStr(weekEnd);
         }
         case FILTER_SCHEDULE.thisMonth: {
           const yearMonth = getDbDateStr(today).substring(0, 7);

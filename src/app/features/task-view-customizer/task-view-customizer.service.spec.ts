@@ -58,6 +58,7 @@ describe('TaskViewCustomizerService', () => {
   };
   let projectUpdateSpy: jasmine.Spy;
   let tagUpdateSpy: jasmine.Spy;
+  let firstDayOfWeek: number;
   // Stand-in for the sidebar (menu-tree) order. Defaults to identity so tags keep
   // their tagsInTreeOrder order; individual tests override it to assert a custom order.
   let menuTreeFlattenFn: (tags: Tag[]) => Tag[];
@@ -157,8 +158,9 @@ describe('TaskViewCustomizerService', () => {
     };
     projectUpdateSpy = jasmine.createSpy('update');
     tagUpdateSpy = jasmine.createSpy('updateTag');
+    firstDayOfWeek = DEFAULT_FIRST_DAY_OF_WEEK;
     const dateAdapter = jasmine.createSpyObj<DateAdapter<Date>>('DateAdapter', [], {
-      getFirstDayOfWeek: () => DEFAULT_FIRST_DAY_OF_WEEK,
+      getFirstDayOfWeek: () => firstDayOfWeek,
     });
 
     TestBed.configureTestingModule({
@@ -1028,41 +1030,219 @@ describe('TaskViewCustomizerService', () => {
   });
 
   for (const field of [FILTER_OPTION_TYPE.deadline, FILTER_OPTION_TYPE.scheduledDate]) {
-    it(`buckets all-day and timed ${field} values by logical day across a month boundary`, () => {
-      jasmine.clock().install();
-      try {
-        jasmine.clock().mockDate(new Date(2030, 5, 1, 2, 30));
-        TestBed.inject(DateService).setStartOfNextDayDiff('04:00');
-        const dates = [
-          { id: 'current-day', day: '2030-05-31', time: null },
-          { id: 'current-time', day: null, time: new Date(2030, 5, 1, 2).getTime() },
-          { id: 'next-day', day: '2030-06-01', time: null },
-          { id: 'next-time', day: null, time: new Date(2030, 5, 1, 4, 30).getTime() },
-        ];
-        const tasks = dates.map(({ id, day, time }) => ({
-          ...mockTasks[0],
-          id,
-          deadlineDay: day,
-          deadlineWithTime: time,
-          dueDay: day,
-          dueWithTime: time,
-        }));
-        for (const value of [FILTER_SCHEDULE.today, FILTER_SCHEDULE.thisMonth]) {
-          expect(service['applyFilter'](tasks, field, value).map((t) => t.id)).toEqual([
-            'current-day',
-            'current-time',
-          ]);
-        }
-        for (const value of [FILTER_SCHEDULE.tomorrow, FILTER_SCHEDULE.nextMonth]) {
-          expect(service['applyFilter'](tasks, field, value).map((t) => t.id)).toEqual([
-            'next-day',
-            'next-time',
-          ]);
-        }
-      } finally {
-        jasmine.clock().uninstall();
+    for (const weekStart of [0, 1]) {
+      for (const { boundary, hour } of [
+        { boundary: '04:00', hour: 4 },
+        { boundary: '00:00', hour: 12 },
+        { boundary: '00:00', hour: 0 },
+      ]) {
+        it(`filters all-day and timed ${field} weeks at ${hour}:30 with boundary ${boundary} (week starts ${weekStart})`, () => {
+          jasmine.clock().install();
+          try {
+            firstDayOfWeek = weekStart;
+            const startDay = weekStart === 1 ? 17 : 16;
+            jasmine.clock().mockDate(new Date(2030, 5, startDay, hour, 30));
+            TestBed.inject(DateService).setStartOfNextDayDiff(boundary);
+            const tasks: TaskWithSubTasks[] = Array.from(
+              { length: 22 },
+              (_, i) => startDay - 7 + i,
+            ).flatMap((day) => {
+              const dateStr = getDbDateStr(new Date(2030, 5, day));
+              return [
+                {
+                  ...mockTasks[0],
+                  id: `${dateStr}-day`,
+                  deadlineDay: dateStr,
+                  deadlineWithTime: null,
+                  dueDay: dateStr,
+                  dueWithTime: null,
+                },
+                {
+                  ...mockTasks[0],
+                  id: `${dateStr}-time`,
+                  deadlineDay: null,
+                  deadlineWithTime: new Date(2030, 5, day, 4, 30).getTime(),
+                  dueDay: null,
+                  dueWithTime: new Date(2030, 5, day, 4, 30).getTime(),
+                },
+              ];
+            });
+            tasks.push({
+              ...mockTasks[0],
+              id: 'no-date',
+              deadlineDay: null,
+              deadlineWithTime: null,
+              dueDay: null,
+              dueWithTime: null,
+            });
+            for (const [value, offset] of [
+              [FILTER_SCHEDULE.thisWeek, 0],
+              [FILTER_SCHEDULE.nextWeek, 7],
+            ] as const) {
+              const expectedIds = Array.from({ length: 7 }, (_, i) =>
+                getDbDateStr(new Date(2030, 5, startDay + offset + i)),
+              ).flatMap((day) => [`${day}-day`, `${day}-time`]);
+              expect(service['applyFilter'](tasks, field, value).map((t) => t.id))
+                .withContext(value)
+                .toEqual(expectedIds);
+            }
+          } finally {
+            jasmine.clock().uninstall();
+          }
+        });
       }
-    });
+    }
+
+    const fourHoursMs = 4 * 60 * 60 * 1000;
+    for (const { label, now, boundary, currentDay, nextDay } of [
+      {
+        label: 'month boundary',
+        now: '2030-06-01T02:30:00',
+        boundary: '04:00',
+        currentDay: '2030-05-31',
+        nextDay: '2030-06-01',
+      },
+      {
+        label: 'year boundary',
+        now: '2031-01-01T02:30:00',
+        boundary: '04:00',
+        currentDay: '2030-12-31',
+        nextDay: '2031-01-01',
+      },
+      {
+        label: 'start of leap day',
+        now: '2032-02-29T02:30:00',
+        boundary: '04:00',
+        currentDay: '2032-02-28',
+        nextDay: '2032-02-29',
+      },
+      {
+        label: 'end of leap day',
+        now: '2032-03-01T02:30:00',
+        boundary: '04:00',
+        currentDay: '2032-02-29',
+        nextDay: '2032-03-01',
+      },
+      // Build boundary instants from local midnight plus elapsed hours, as
+      // DateService defines them. Include transition dates for Berlin and LA
+      // without baking one timezone's UTC offset into the shared suite.
+      ...[
+        {
+          label: 'Berlin spring DST',
+          day: '2030-03-31',
+          previousDay: '2030-03-30',
+          followingDay: '2030-04-01',
+        },
+        {
+          label: 'Berlin fall DST',
+          day: '2030-10-27',
+          previousDay: '2030-10-26',
+          followingDay: '2030-10-28',
+        },
+        {
+          label: 'LA spring DST',
+          day: '2030-03-10',
+          previousDay: '2030-03-09',
+          followingDay: '2030-03-11',
+        },
+        {
+          label: 'LA fall DST',
+          day: '2030-11-03',
+          previousDay: '2030-11-02',
+          followingDay: '2030-11-04',
+        },
+      ].flatMap(({ label: transition, day, previousDay, followingDay }) => [
+        {
+          label: `${transition} before logical boundary`,
+          now: parseDbDateStr(day).getTime() + fourHoursMs - 1,
+          boundary: '04:00',
+          currentDay: previousDay,
+          nextDay: day,
+        },
+        {
+          label: `${transition} exact logical boundary`,
+          now: parseDbDateStr(day).getTime() + fourHoursMs,
+          boundary: '04:00',
+          currentDay: day,
+          nextDay: followingDay,
+        },
+      ]),
+      {
+        label: 'exact boundary',
+        now: '2030-06-01T04:00:00',
+        boundary: '04:00',
+        currentDay: '2030-06-01',
+        nextDay: '2030-06-02',
+      },
+      {
+        label: 'zero setting at midnight',
+        now: '2030-06-01T00:00:00',
+        boundary: 0,
+        currentDay: '2030-06-01',
+        nextDay: '2030-06-02',
+      },
+      {
+        label: 'negative setting normalizes to midnight',
+        now: '2030-06-01T00:00:00',
+        boundary: -4,
+        currentDay: '2030-06-01',
+        nextDay: '2030-06-02',
+      },
+    ]) {
+      it(`buckets all-day and timed ${field} values by logical day: ${label}`, () => {
+        jasmine.clock().install();
+        try {
+          jasmine.clock().mockDate(new Date(now));
+          const dateService = TestBed.inject(DateService);
+          dateService.setStartOfNextDayDiff(boundary);
+          const offset = boundary === '04:00' ? 4 * 60 * 60 * 1000 : 0;
+          expect(dateService.getStartOfNextDayDiffMs()).toBe(offset);
+          const dates = [
+            { id: 'current-day', day: currentDay, time: null },
+            { id: 'current-time', day: null, time: new Date(now).getTime() },
+            {
+              id: 'current-end',
+              day: null,
+              time: parseDbDateStr(nextDay).getTime() + offset - 1,
+            },
+            { id: 'next-day', day: nextDay, time: null },
+            {
+              id: 'next-time',
+              day: null,
+              time: parseDbDateStr(nextDay).getTime() + offset,
+            },
+            { id: 'no-date', day: null, time: null },
+          ];
+          const tasks = dates.map(({ id, day, time }) => ({
+            ...mockTasks[0],
+            id,
+            deadlineDay: day,
+            deadlineWithTime: time,
+            dueDay: day,
+            dueWithTime: time,
+          }));
+          const currentIds = ['current-day', 'current-time', 'current-end'];
+          const nextIds = ['next-day', 'next-time'];
+          const sameMonth = currentDay.slice(0, 7) === nextDay.slice(0, 7);
+          for (const [value, expectedIds] of [
+            [FILTER_SCHEDULE.today, currentIds],
+            [FILTER_SCHEDULE.tomorrow, nextIds],
+            [
+              FILTER_SCHEDULE.thisMonth,
+              sameMonth ? [...currentIds, ...nextIds] : currentIds,
+            ],
+            [FILTER_SCHEDULE.nextMonth, sameMonth ? [] : nextIds],
+            [FILTER_COMMON.NOT_SPECIFIED, ['no-date']],
+          ] as const) {
+            expect(service['applyFilter'](tasks, field, value).map((t) => t.id))
+              .withContext(value)
+              .toEqual(expectedIds);
+          }
+        } finally {
+          jasmine.clock().uninstall();
+        }
+      });
+    }
   }
 
   it('should filter by deadline using deadlineWithTime when deadlineDay is not set', () => {
