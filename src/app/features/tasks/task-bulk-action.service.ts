@@ -95,8 +95,10 @@ export class TaskBulkActionService {
 
   /** The selected tasks resolved against the store, in visual order. */
   readonly selectedTasks = computed<Task[]>(() => {
-    const entities = this._taskEntities();
     const ids = this._multiSelect.selectedIds();
+    // Without a selection, skip the entities: they change with every task update.
+    if (!ids.size) return [];
+    const entities = this._taskEntities();
     const tasks: Task[] = [];
     ids.forEach((id) => {
       const task = entities[id];
