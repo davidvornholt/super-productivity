@@ -48,6 +48,12 @@ export const parseTimeSpentBody = (
   return { date, duration };
 };
 
+/** Whether adding `duration` to `date` would put more than 24h on that day. */
+export const exceedsTimeSpentPerDay = (
+  timeSpentOnDay: Record<string, number> | undefined,
+  { date, duration }: { date: string; duration: number },
+): boolean => (timeSpentOnDay?.[date] || 0) + duration > MAX_TIME_SPENT_PER_DAY_MS;
+
 /**
  * `timeSpent` is the sum of `timeSpentOnDay` and is recalculated from it, so a
  * total written on its own wouldn't last. Task create and update reject a

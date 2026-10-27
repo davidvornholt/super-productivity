@@ -25,7 +25,7 @@ import { LOCAL_REST_API_FEATURE_BRIDGE } from './local-rest-api-feature-bridge';
 import { LOCAL_REST_API_FEATURE_ROUTES } from './local-rest-api-feature-routes';
 import { createErrorResponse, createSuccessResponse } from './local-rest-api-response';
 import {
-  MAX_TIME_SPENT_PER_DAY_MS,
+  exceedsTimeSpentPerDay,
   isTimeSpentChange,
   parseTimeSpentBody,
   rejectTimeSpentField,
@@ -1052,8 +1052,7 @@ export class LocalRestApiHandlerService {
         }
         return createSuccessResponse(requestId, 200, await this._getTaskById(taskId));
       }
-      const dayTotal = (task.timeSpentOnDay?.[parsed.date] || 0) + parsed.duration;
-      if (dayTotal > MAX_TIME_SPENT_PER_DAY_MS) {
+      if (exceedsTimeSpentPerDay(task.timeSpentOnDay, parsed)) {
         const msg = 'Time spent on one day cannot exceed 24h';
         return createErrorResponse(requestId, 400, 'INVALID_INPUT', msg);
       }
