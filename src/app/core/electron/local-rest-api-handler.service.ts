@@ -26,6 +26,7 @@ import { LOCAL_REST_API_FEATURE_ROUTES } from './local-rest-api-feature-routes';
 import { createErrorResponse, createSuccessResponse } from './local-rest-api-response';
 import {
   MAX_TIME_SPENT_PER_DAY_MS,
+  isTimeSpentChange,
   parseTimeSpentBody,
   rejectTimeSpentField,
 } from './local-rest-api-task-time';
@@ -686,7 +687,7 @@ export class LocalRestApiHandlerService {
       );
     }
 
-    if (hasOwn(body, 'timeSpent')) {
+    if (isTimeSpentChange(body, 0)) {
       return rejectTimeSpentField(requestId);
     }
 
@@ -873,10 +874,6 @@ export class LocalRestApiHandlerService {
             `${rejected} cannot be set via PATCH — re-parenting is not supported by this API`,
           );
         }
-        if (hasOwn(body, 'timeSpent')) {
-          return rejectTimeSpentField(requestId);
-        }
-
         const changes = pickAllowedFields(body);
         const validation = validateWritableFields(changes);
         if (!validation.ok) {
@@ -902,6 +899,9 @@ export class LocalRestApiHandlerService {
         const task = await this._getTaskById(taskId);
         if (!task) {
           return createErrorResponse(requestId, 404, 'TASK_NOT_FOUND', 'Task not found');
+        }
+        if (isTimeSpentChange(body, task.timeSpent)) {
+          return rejectTimeSpentField(requestId);
         }
         // An echoed `isDone: true` (GET→PATCH round trip) would only stamp a
         // new `doneOn`: it moves the completion date and turns a won't-do task

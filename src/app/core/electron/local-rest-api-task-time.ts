@@ -50,9 +50,18 @@ export const parseTimeSpentBody = (
 
 /**
  * `timeSpent` is the sum of `timeSpentOnDay` and is recalculated from it, so a
- * total written on its own wouldn't last. Task create and update reject it and
- * point to the per-day routes instead.
+ * total written on its own wouldn't last. Task create and update reject a
+ * `timeSpent` that differs from the current total (0 for a new task) and point
+ * to the per-day routes instead. An unchanged value is ignored, so GET→PATCH
+ * round trips keep working, as with a subtask's unchanged `projectId`.
  */
+export const isTimeSpentChange = (
+  body: Record<string, unknown>,
+  currentTimeSpent: number,
+): boolean =>
+  Object.prototype.hasOwnProperty.call(body, 'timeSpent') &&
+  body.timeSpent !== currentTimeSpent;
+
 export const rejectTimeSpentField = (requestId: string): LocalRestApiResponsePayload =>
   createErrorResponse(
     requestId,
