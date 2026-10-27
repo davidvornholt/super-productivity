@@ -215,11 +215,7 @@ export const createWindow = async ({
   const isScreenshotMode = process.env.SP_SCREENSHOT_MODE === '1';
   const webPreferences: BrowserWindowConstructorOptions['webPreferences'] = {
     scrollBounce: true,
-    // Keep Electron's default so a hidden or minimized window stops rendering;
-    // with `false` the compositor keeps producing frames nobody sees. Timers stay
-    // unthrottled through the switches in start-app.ts. While hidden, the page
-    // reports `document.hidden` and gets no animation frames.
-    backgroundThrottling: true,
+    backgroundThrottling: false,
     webSecurity: true,
     preload: path.join(__dirname, 'preload.js'),
     nodeIntegration: false,
