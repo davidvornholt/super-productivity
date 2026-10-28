@@ -8,9 +8,13 @@ const saveAttachment = async (page: Page, path: string): Promise<void> => {
   const dialog = page.locator('dialog-edit-task-attachment');
   const pathInput = dialog.locator('input[name="path"]');
   const save = dialog.getByRole('button', { name: 'Save', exact: true });
-  await pathInput.fill(path);
-  await expect(pathInput).toHaveValue(path);
-  await expect(save).toBeEnabled();
+  // A fill that lands while the dialog is still opening can be cleared again,
+  // so fill until the value sticks and the form accepts it.
+  await expect(async () => {
+    await pathInput.fill(path);
+    await expect(pathInput).toHaveValue(path, { timeout: 1000 });
+    await expect(save).toBeEnabled({ timeout: 1000 });
+  }).toPass({ timeout: 15000 });
   await save.click();
   await expect(dialog).toHaveCount(0);
 };
