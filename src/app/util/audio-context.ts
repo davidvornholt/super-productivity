@@ -12,6 +12,55 @@ let unlocked = false;
 let keepAwake = false;
 
 /**
+ * How long the context stays running after the last sound ends. A running
+ * AudioContext keeps rendering silence (~70-90 wakeups/s on Chromium, measured
+ * 2026-10 on Linux/Electron) until it is suspended, so it is released shortly
+ * after the last sound instead of at first use for the rest of the session.
+ * Long enough that a quick burst of sounds (e.g. several tasks marked done)
+ * reuses the running context.
+ */
+export const IDLE_SUSPEND_DELAY_MS = 5000;
+// Owners of sounds that are currently playing (see holdAudioContext()).
+const activeSounds = new Set<object>();
+let idleSuspendTimer: ReturnType<typeof setTimeout> | null = null;
+// suspend() flips `state` only once its promise settles; ensureAudioContextRunning()
+// awaits this so a resume is not lost to a suspend that is still in flight.
+let pendingSuspend: Promise<void> | null = null;
+
+const suspendNow = (): void => {
+  if (!audioContext || audioContext.state !== 'running') {
+    return;
+  }
+  // Swallow errors — the context may already be closing.
+  const suspending = audioContext.suspend().catch(() => {});
+  pendingSuspend = suspending;
+  void suspending.then(() => {
+    if (pendingSuspend === suspending) {
+      pendingSuspend = null;
+    }
+  });
+};
+
+const cancelIdleSuspend = (): void => {
+  if (idleSuspendTimer !== null) {
+    clearTimeout(idleSuspendTimer);
+    idleSuspendTimer = null;
+  }
+};
+
+// (Re)starts the idle countdown; holdAudioContext() cancels it.
+const scheduleIdleSuspend = (): void => {
+  cancelIdleSuspend();
+  if (activeSounds.size > 0) {
+    return;
+  }
+  idleSuspendTimer = setTimeout(() => {
+    idleSuspendTimer = null;
+    suspendNow();
+  }, IDLE_SUSPEND_DELAY_MS);
+};
+
+/**
  * Returns the singleton AudioContext instance, creating it if necessary.
  */
 export const getAudioContext = (): AudioContext => {
@@ -19,6 +68,8 @@ export const getAudioContext = (): AudioContext => {
     audioContext = new (
       (window as any).AudioContext || (window as any).webkitAudioContext
     )();
+    // Where autoplay is allowed (Electron) a new context starts running.
+    scheduleIdleSuspend();
   }
 
   return audioContext!;
@@ -30,6 +81,9 @@ export const getAudioContext = (): AudioContext => {
  */
 export const ensureAudioContextRunning = async (): Promise<AudioContext> => {
   const ctx = getAudioContext();
+  if (pendingSuspend) {
+    await pendingSuspend;
+  }
   if (ctx.state === 'suspended') {
     await ctx.resume();
   }
@@ -62,6 +116,27 @@ export const getAudioBuffer = async (filePath: string): Promise<AudioBuffer> => 
 };
 
 /**
+ * Marks a sound as playing so the idle suspend leaves the context running until
+ * releaseAudioContext() is called with the same owner. Call it before awaiting
+ * ensureAudioContextRunning() so the context cannot be suspended in between.
+ */
+export const holdAudioContext = (owner: object): void => {
+  activeSounds.add(owner);
+  cancelIdleSuspend();
+};
+
+/**
+ * Ends a holdAudioContext() hold. Once no sound holds the context it is
+ * suspended after IDLE_SUSPEND_DELAY_MS. Releasing an owner that holds nothing
+ * is a no-op, so teardown paths can call it unconditionally.
+ */
+export const releaseAudioContext = (owner: object): void => {
+  if (activeSounds.delete(owner)) {
+    scheduleIdleSuspend();
+  }
+};
+
+/**
  * Plays a decoded audio buffer at the given volume with optional source configuration.
  * Handles gain routing and node cleanup after playback.
  *
@@ -74,29 +149,37 @@ export const playBuffer = async (
   volume: number = 100,
   configureSource?: (source: AudioBufferSourceNode) => void,
 ): Promise<void> => {
-  const audioCtx = await ensureAudioContextRunning();
-  const source = audioCtx.createBufferSource();
-  source.buffer = buffer;
-  configureSource?.(source);
+  const hold = {};
+  holdAudioContext(hold);
+  try {
+    const audioCtx = await ensureAudioContextRunning();
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    configureSource?.(source);
 
-  let gainNode: GainNode | null = null;
-  if (volume !== 100) {
-    gainNode = audioCtx.createGain();
-    gainNode.gain.value = volume / 100;
-    source.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-  } else {
-    source.connect(audioCtx.destination);
-  }
-
-  source.onended = (): void => {
-    source.disconnect();
-    if (gainNode) {
-      gainNode.disconnect();
+    let gainNode: GainNode | null = null;
+    if (volume !== 100) {
+      gainNode = audioCtx.createGain();
+      gainNode.gain.value = volume / 100;
+      source.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+    } else {
+      source.connect(audioCtx.destination);
     }
-  };
 
-  source.start(0);
+    source.onended = (): void => {
+      source.disconnect();
+      if (gainNode) {
+        gainNode.disconnect();
+      }
+      releaseAudioContext(hold);
+    };
+
+    source.start(0);
+  } catch (e) {
+    releaseAudioContext(hold);
+    throw e;
+  }
 };
 
 /**
@@ -123,10 +206,10 @@ export const setAudioContextKeepAwake = (keep: boolean): void => {
  * still needs it running (see setAudioContextKeepAwake).
  */
 export const suspendAudioContext = (): void => {
-  if (!keepAwake && audioContext && audioContext.state === 'running') {
+  if (!keepAwake) {
     // suspend() returns a promise; the release begins immediately so we don't
-    // await it. Swallow errors — the context may already be closing.
-    void audioContext.suspend().catch(() => {});
+    // await it.
+    suspendNow();
   }
 };
 
@@ -146,8 +229,13 @@ export const unlockAudioContext = (): void => {
     ac.abort();
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
-      // Fire-and-forget — ensureAudioContextRunning() retries before actual playback
-      ctx.resume().catch(() => {});
+      // Fire-and-forget — ensureAudioContextRunning() retries before actual playback.
+      // Resuming inside the gesture is what unlocks the context (iOS); once
+      // unlocked it may be suspended and resumed again without one.
+      ctx
+        .resume()
+        .then(scheduleIdleSuspend)
+        .catch(() => {});
     }
   };
 
@@ -175,4 +263,7 @@ export const closeAudioContext = (): void => {
   audioBufferCache.clear();
   unlocked = false;
   keepAwake = false;
+  activeSounds.clear();
+  cancelIdleSuspend();
+  pendingSuspend = null;
 };

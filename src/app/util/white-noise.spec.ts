@@ -1,5 +1,5 @@
 import { setWhiteNoiseVolume, startWhiteNoise, stopWhiteNoise } from './white-noise';
-import { closeAudioContext } from './audio-context';
+import { closeAudioContext, IDLE_SUSPEND_DELAY_MS } from './audio-context';
 
 describe('white-noise', () => {
   let originalAudioContext: typeof AudioContext;
@@ -43,6 +43,8 @@ describe('white-noise', () => {
 
   afterEach(() => {
     stopWhiteNoise();
+    // Also cancels the idle-suspend timer the stop scheduled.
+    closeAudioContext();
     (window as any).AudioContext = originalAudioContext;
   });
 
@@ -53,6 +55,56 @@ describe('white-noise', () => {
     setWhiteNoiseVolume(10);
 
     expect(mockGainNode.gain.value).toBeCloseTo(0.1);
+  });
+
+  it('keeps the shared context running while playing and lets it idle-suspend after stop', async () => {
+    mockContext.suspend = jasmine.createSpy('suspend').and.returnValue(Promise.resolve());
+    jasmine.clock().install();
+    try {
+      await startWhiteNoise(40);
+      jasmine.clock().tick(IDLE_SUSPEND_DELAY_MS * 10);
+      expect(mockContext.suspend).not.toHaveBeenCalled();
+
+      stopWhiteNoise();
+      jasmine.clock().tick(IDLE_SUSPEND_DELAY_MS);
+
+      expect(mockContext.suspend).toHaveBeenCalled();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  it('starts a single loop when stopped and restarted while the context resumes', async () => {
+    let resolveResume!: () => void;
+    mockContext.state = 'suspended';
+    mockContext.resume.and.returnValue(
+      new Promise<void>((resolve) => (resolveResume = resolve)),
+    );
+
+    const first = startWhiteNoise(40);
+    stopWhiteNoise();
+    const second = startWhiteNoise(40);
+    resolveResume();
+    await Promise.all([first, second]);
+
+    expect(mockContext.createBufferSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the shared context when the start fails', async () => {
+    mockContext.state = 'suspended';
+    mockContext.resume.and.returnValue(Promise.reject(new Error('NotAllowedError')));
+    mockContext.suspend = jasmine.createSpy('suspend').and.returnValue(Promise.resolve());
+    jasmine.clock().install();
+    try {
+      await expectAsync(startWhiteNoise(40)).toBeRejectedWithError('NotAllowedError');
+      // a later sound resumes the context; the failed start must not keep it awake
+      mockContext.state = 'running';
+      jasmine.clock().tick(IDLE_SUSPEND_DELAY_MS);
+
+      expect(mockContext.suspend).toHaveBeenCalled();
+    } finally {
+      jasmine.clock().uninstall();
+    }
   });
 
   it('keeps a volume set while the context is still resuming', async () => {

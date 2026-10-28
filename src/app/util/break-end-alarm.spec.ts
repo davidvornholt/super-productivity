@@ -1,5 +1,5 @@
 import { startBreakEndAlarm, stopBreakEndAlarm } from './break-end-alarm';
-import { closeAudioContext } from './audio-context';
+import { closeAudioContext, IDLE_SUSPEND_DELAY_MS } from './audio-context';
 
 const SOUND = 'positive.mp3';
 
@@ -59,6 +59,8 @@ describe('break-end-alarm', () => {
 
   afterEach(() => {
     stopBreakEndAlarm();
+    // Also cancels the idle-suspend timer the stop scheduled.
+    closeAudioContext();
     (window as any).AudioContext = originalAudioContext;
     (window as any).fetch = originalFetch;
   });
@@ -104,6 +106,23 @@ describe('break-end-alarm', () => {
       jasmine.clock().tick(TEN_MINUTES_MS + 1);
 
       expect(source.stop).toHaveBeenCalled();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  it('keeps the shared context running while looping and lets it idle-suspend after stop', async () => {
+    mockContext.suspend = jasmine.createSpy('suspend').and.returnValue(Promise.resolve());
+    jasmine.clock().install();
+    try {
+      await startBreakEndAlarm(SOUND, 100);
+      jasmine.clock().tick(IDLE_SUSPEND_DELAY_MS * 10);
+      expect(mockContext.suspend).not.toHaveBeenCalled();
+
+      stopBreakEndAlarm();
+      jasmine.clock().tick(IDLE_SUSPEND_DELAY_MS);
+
+      expect(mockContext.suspend).toHaveBeenCalled();
     } finally {
       jasmine.clock().uninstall();
     }
