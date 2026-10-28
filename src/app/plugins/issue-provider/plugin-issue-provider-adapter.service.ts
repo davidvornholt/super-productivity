@@ -585,25 +585,22 @@ export class PluginIssueProviderAdapterService implements IssueServiceInterface 
         return;
       }
 
-      const hasTimeTracking = currentTask.timeSpent > 0;
-      if (hasTimeTracking) {
-        this._snackService.open({
-          type: 'WARNING',
-          msg: T.F.ISSUE.S.REMOTE_ISSUE_DELETED_WITH_TIME,
-          translateParams: { taskTitle: currentTask.title },
-          ico: 'delete_forever',
-          actionStr: T.G.DELETE,
-          actionFn: () => this._removeIfIssueStillMatches(currentTask),
-        });
-      } else {
-        this._taskService.removeMultipleTasks([currentTask.id]);
-        this._snackService.open({
-          type: 'CUSTOM',
-          msg: T.F.ISSUE.S.REMOTE_ISSUE_DELETED,
-          translateParams: { taskTitle: currentTask.title },
-          ico: 'delete_forever',
-        });
-      }
+      // No tracked time does not mean no local work: notes, children and
+      // attachments may exist. An unavailable issue (including a 404 after
+      // losing access) must not implicitly delete that task family.
+      this._snackService.open({
+        type: 'WARNING',
+        msg:
+          currentTask.timeSpent > 0
+            ? T.F.ISSUE.S.REMOTE_ISSUE_DELETED_WITH_TIME
+            : T.F.ISSUE.S.REMOTE_ISSUE_DELETED,
+        translateParams: { taskTitle: currentTask.title },
+        ico: 'delete_forever',
+        actionStr: T.G.DELETE,
+        actionFn: () => this._removeIfIssueStillMatches(currentTask),
+        // Keep the action visible through the manual refresh's "no update" snack.
+        config: { duration: 0 },
+      });
     });
   }
 
