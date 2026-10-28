@@ -1,5 +1,10 @@
-import { inject, Injectable } from '@angular/core';
-import { Store } from '@ngrx/store';
+import { inject, Injectable, Injector } from '@angular/core';
+import { ScannedActionsSubject, Store } from '@ngrx/store';
+import { filter, map, pairwise, tap } from 'rxjs/operators';
+import { defer } from 'rxjs';
+import { bulkApplyOperations } from '../../op-log/apply/bulk-hydration.action';
+import { extractActionPayload } from '../../op-log/core/operation.types';
+import { addSubTask } from './store/task.actions';
 import {
   BatchedTimeSyncAccumulator,
   BatchedTimeSyncEntry,
@@ -8,6 +13,7 @@ import { AppStateSnapshot } from '../../op-log/core/types/backup.types';
 import { RootState } from '../../root-store/root-state';
 import { syncTimeSpent } from '../time-tracking/store/time-tracking.actions';
 import { TaskState } from './task.model';
+import { selectCurrentTask } from './store/task.selectors';
 import { projectPendingTimeFromTaskState } from './util/project-pending-time-from-task-state';
 
 /**
@@ -16,12 +22,60 @@ import { projectPendingTimeFromTaskState } from './util/project-pending-time-fro
 @Injectable({ providedIn: 'root' })
 export class TaskTimeSyncService {
   private static readonly SYNC_INTERVAL_MS = 5 * 60 * 1000;
+  private readonly _injector = inject(Injector);
   private readonly _store = inject<Store<RootState>>(Store);
+  private readonly _currentTask = this._store.selectSignal(selectCurrentTask);
   private readonly _accumulator = new BatchedTimeSyncAccumulator(
     TaskTimeSyncService.SYNC_INTERVAL_MS,
     (taskId, date, duration) => {
       this._store.dispatch(syncTimeSpent({ taskId, date, duration }));
     },
+  );
+
+  // TaskService subscribes once for its lifetime. Scanned actions pair the
+  // committed pointer change with its cause, including a whole remote bulk.
+  // A store selector alone loses the creation payload and intermediate maps.
+  readonly taskChange$ = defer(() => this._injector.get(ScannedActionsSubject)).pipe(
+    map((action) => ({ action, task: this._currentTask() })),
+    pairwise(),
+    filter(([previous, current]) => previous.task?.id !== current.task?.id),
+    tap(([previous, current]) => {
+      if (
+        previous.task &&
+        previous.task.subTaskIds.length === 0 &&
+        current.task?.parentId === previous.task.id
+      ) {
+        const action = current.action;
+        const creations =
+          action.type === bulkApplyOperations.type
+            ? (action as ReturnType<typeof bulkApplyOperations>).operations
+                .filter((op) => op.actionType === addSubTask.type)
+                .map((op) => extractActionPayload(op.payload))
+            : action.type === addSubTask.type
+              ? [action]
+              : [];
+        // Match addSubTask's inheritance condition on the INPUT, before remote
+        // additive deltas replace the inherited map. Explicit pasted time must
+        // never receive the parent's pending batch, even if totals happen to match.
+        const inherited = creations.some((creation) => {
+          const { task, parentId } = creation as ReturnType<typeof addSubTask>;
+          return (
+            parentId === previous.task!.id &&
+            task.id === current.task!.id &&
+            Object.keys(task.timeSpentOnDay || {}).length === 0
+          );
+        });
+        if (inherited) {
+          const pending = this._accumulator
+            .getPendingEntries()
+            .find((entry) => entry.id === previous.task!.id);
+          if (pending) {
+            this._accumulator.clearOne(pending.id);
+            this._accumulator.accumulate(current.task.id, pending.duration, pending.date);
+          }
+        }
+      }
+    }),
   );
 
   accumulate(taskId: string, duration: number, date: string): void {
