@@ -7,6 +7,7 @@ import { signal } from '@angular/core';
 import { PluginIframeMessageType } from '@super-productivity/plugin-api';
 import { PluginIndexComponent } from './plugin-index.component';
 import { PluginService } from '../../plugin.service';
+import { DataInitStateService } from '../../../core/data-init/data-init-state.service';
 import { PluginBridgeService } from '../../plugin-bridge.service';
 import { PluginCleanupService } from '../../plugin-cleanup.service';
 import { LayoutService } from '../../../core-ui/layout/layout.service';
@@ -91,6 +92,21 @@ describe('PluginIndexComponent', () => {
     await setup();
     expect(getIframe()).toBeTruthy();
     expect(component.isLoading()).toBe(false);
+  });
+
+  it('waits for hydration before discovering enabled plugins on a fresh route', async () => {
+    await setup();
+    pluginService.isInitialized.and.returnValue(false);
+    pluginService.initializePlugins.and.resolveTo();
+
+    const initialization = component.ngOnInit();
+    await Promise.resolve();
+    expect(pluginService.initializePlugins).not.toHaveBeenCalled();
+
+    TestBed.inject(DataInitStateService)._neverUpdateOutsideDataInitService$.next(true);
+    await initialization;
+    expect(pluginService.initializePlugins).toHaveBeenCalledTimes(1);
+    expect(component.error()).toBeNull();
   });
 
   // Enabling a plugin flips isEnabled before its assets are fetched; opening the

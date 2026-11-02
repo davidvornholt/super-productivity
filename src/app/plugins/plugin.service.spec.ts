@@ -1,6 +1,9 @@
 import { provideHttpClient, withXhr } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { TestBed } from '@angular/core/testing';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
+import { fakeAsync, flushMicrotasks, TestBed } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { provideMockStore } from '@ngrx/store/testing';
 import { TranslateService } from '@ngx-translate/core';
@@ -199,6 +202,99 @@ describe('PluginService', () => {
   it('starts uninitialized with no loaded plugins', () => {
     expect(service.isInitialized()).toBe(false);
     expect(service.getLoadedPlugins()).toEqual([]);
+  });
+
+  it('shares overlapping initialization through discovery and enabled plugin loading', fakeAsync(() => {
+    const http = TestBed.inject(HttpTestingController);
+    const manifest: PluginManifest = { ...mockManifest, id: 'automations' };
+    pluginMetaPersistenceService.isPluginEnabled.and.resolveTo(true);
+    const cache = TestBed.inject(
+      PluginCacheService,
+    ) as jasmine.SpyObj<PluginCacheService>;
+    cache.getAllPlugins.and.resolveTo([]);
+    pluginLoader.loadPluginAssets.and.resolveTo({ manifest, code: '' });
+    pluginRunner.loadPlugin.and.resolveTo({ manifest, loaded: true, isEnabled: true });
+    let finishLoading!: () => void;
+    pluginRunner.triggerReady.and.returnValue(
+      new Promise<void>((resolve) => (finishLoading = resolve)),
+    );
+
+    const completed = [false, false];
+    void service.initializePlugins().then(() => (completed[0] = true));
+    void service.initializePlugins().then(() => (completed[1] = true));
+    flushMicrotasks();
+    // Hold any duplicate discovery until the first initialization finishes. Before
+    // the fix, it then overwrites the loaded state and executes Automations again.
+    const initialRequests = http.match(() => true);
+    expect(initialRequests.length).toBe(1);
+    const finishDiscovery = (): void => {
+      let requests = http.match(() => true);
+      while (requests.length) {
+        for (const request of requests) {
+          request.flush(
+            request.request.url.endsWith('/automations/manifest.json') ? manifest : null,
+          );
+        }
+        flushMicrotasks();
+        requests = http.match(() => true);
+      }
+    };
+    initialRequests[0].flush(null);
+    flushMicrotasks();
+    finishDiscovery();
+
+    expect(pluginRunner.loadPlugin).toHaveBeenCalledTimes(1);
+    expect(service.isInitialized()).toBe(false);
+    expect(completed).toEqual([false, false]);
+    finishLoading();
+    flushMicrotasks();
+    expect(completed).toEqual([true, true]);
+    expect(service.getAllPluginStates().get(manifest.id)?.status).toBe('loaded');
+
+    // Drain the pre-fix duplicate as well, so the regression demonstrates a second
+    // execution rather than merely an extra pending HTTP request.
+    for (const request of initialRequests.slice(1)) {
+      request.flush(null);
+      flushMicrotasks();
+      finishDiscovery();
+    }
+    expect(pluginRunner.loadPlugin).toHaveBeenCalledTimes(1);
+    expect(pluginRunner.triggerReady).toHaveBeenCalledOnceWith(manifest.id);
+    expect(cache.getAllPlugins).toHaveBeenCalledTimes(1);
+    expect(completed).toEqual([true, true]);
+    http.verify();
+  }));
+
+  it('rejects all initialization callers on failure and allows a retry', async () => {
+    const runtime = service as unknown as {
+      _discoverBuiltInPlugins: () => Promise<void>;
+      _discoverUploadedPlugins: () => Promise<void>;
+      _loadEnabledPlugins: () => Promise<void>;
+    };
+    let failDiscovery!: (error: Error) => void;
+    const discovery = spyOn(runtime, '_discoverBuiltInPlugins').and.returnValue(
+      new Promise<void>((_, reject) => (failDiscovery = reject)),
+    );
+    spyOn(runtime, '_discoverUploadedPlugins').and.resolveTo();
+    spyOn(runtime, '_loadEnabledPlugins').and.resolveTo();
+    const error = new Error('Initialization failed');
+    const results = Promise.allSettled([
+      service.initializePlugins(),
+      service.initializePlugins(),
+    ]);
+    failDiscovery(error);
+
+    expect(await results).toEqual([
+      { status: 'rejected', reason: error },
+      { status: 'rejected', reason: error },
+    ]);
+    expect(discovery).toHaveBeenCalledTimes(1);
+    expect(service.isInitialized()).toBe(false);
+
+    discovery.and.resolveTo();
+    await service.initializePlugins();
+    expect(discovery).toHaveBeenCalledTimes(2);
+    expect(service.isInitialized()).toBe(true);
   });
 
   it('returns only loaded plugins from getLoadedPlugin', async () => {
