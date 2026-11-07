@@ -3,6 +3,7 @@ import type { AppDataComplete } from '../../../src/app/op-log/model/model-config
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test } from '../../fixtures/test.fixture';
 import { ImportPage } from '../../pages/import.page';
+import { allowDevErrorsInCurrentTest } from '../../utils/runtime-errors';
 import { flushPendingWrites } from '../../utils/waits';
 
 type Backup = { data: AppDataComplete; timestamp: number; crossModelVersion: number };
@@ -23,6 +24,8 @@ for (const archive of ['archiveYoung', 'archiveOld'] as const) {
       workViewPage,
     }, testInfo) => {
       test.setTimeout(120000);
+      // The missing tag below is what makes validation fail and run repair.
+      allowDevErrorsInCurrentTest(/tagId from task not existing/);
       await workViewPage.waitForTaskList();
       await workViewPage.addTask('Synthetic recovery sentinel 10m/1h');
       const backup = await exportBackup(page);
