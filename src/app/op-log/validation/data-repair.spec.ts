@@ -193,24 +193,30 @@ describe('dataRepair()', () => {
     const liveInYoung = task('LIVE_IN_YOUNG');
     const liveInBoth = task('LIVE_IN_BOTH_ARCHIVES');
     const archivedInBoth: Task = { ...task('ARCHIVED_IN_BOTH'), isDone: true };
+    // The subtask steps restore CHILD from archiveOld to its live parent, so its
+    // archiveYoung copy only becomes a live duplicate in the final deduplication.
+    const parent: Task = { ...task('PARENT'), subTaskIds: ['CHILD'] };
+    const child: Task = { ...task('CHILD'), parentId: parent.id };
     mock.project.entities[FAKE_PROJECT_ID] = {
       ...DEFAULT_PROJECT,
       id: FAKE_PROJECT_ID,
       title: 'FAKE_PROJECT',
-      taskIds: [liveInYoung.id, liveInBoth.id],
+      taskIds: [liveInYoung.id, liveInBoth.id, parent.id],
     };
     mock.task = {
       ...mock.task,
-      ...fakeEntityStateFromArray<Task>([liveInYoung, liveInBoth]),
+      ...fakeEntityStateFromArray<Task>([liveInYoung, liveInBoth, parent]),
     } as TaskState;
     mock.archiveYoung.task = fakeEntityStateFromArray<Task>([
       liveInYoung,
       liveInBoth,
       archivedInBoth,
+      task(child.id),
     ]) as TaskArchive;
     mock.archiveOld.task = fakeEntityStateFromArray<Task>([
       liveInBoth,
       archivedInBoth,
+      child,
     ]) as TaskArchive;
 
     const { data: repaired, repairSummary } = dataRepair(mock);
@@ -220,9 +226,11 @@ describe('dataRepair()', () => {
     }
     expect(repaired.archiveYoung.task.ids).toEqual([]);
     expect(repaired.archiveOld.task.ids).toEqual([archivedInBoth.id]);
-    // Four copies go: both live tasks from archiveYoung, LIVE_IN_BOTH_ARCHIVES
-    // from archiveOld and ARCHIVED_IN_BOTH from archiveYoung.
-    expect(repairSummary.entityStateFixed).toBe(4);
+    expect(repaired.task.entities[child.id]).toEqual(child);
+    // Five copies go: LIVE_IN_YOUNG, LIVE_IN_BOTH_ARCHIVES and CHILD from
+    // archiveYoung, LIVE_IN_BOTH_ARCHIVES from archiveOld and ARCHIVED_IN_BOTH
+    // from archiveYoung. Restoring CHILD from archiveOld is a move, not a removal.
+    expect(repairSummary.entityStateFixed).toBe(5);
     expect(validateFull(repaired)).toEqual(jasmine.objectContaining({ isValid: true }));
   });
 
