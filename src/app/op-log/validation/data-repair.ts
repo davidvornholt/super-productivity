@@ -109,6 +109,9 @@ export const dataRepair = (
   dataOut = _fixEntityStates(dataOut, summary);
   dataOut = _ensureTaskArrayProperties(dataOut, summary);
   dataOut = _removeMissingTasksFromListsOrRestoreFromArchive(dataOut, summary);
+  // Before the subtask steps: a stale archived parent would keep its archived
+  // children from being restored to the live parent.
+  dataOut = _removeArchivedCopiesOfLiveTasks(dataOut, summary);
   dataOut = _removeNonExistentProjectIdsFromIssueProviders(dataOut, summary);
   dataOut = _removeNonExistentProjectIdsFromTaskRepeatCfg(dataOut, summary);
   dataOut = _removeNonExistentRepeatCfgIdsFromTasks(dataOut, summary);
@@ -379,7 +382,8 @@ const _fixEntityStates = (
   return data;
 };
 
-const _removeDuplicatesFromArchive = (
+// A live task wins over its archived copy: drop the copy from both archives.
+const _removeArchivedCopiesOfLiveTasks = (
   data: AppDataComplete,
   summary: RepairSummary,
 ): AppDataComplete => {
@@ -428,10 +432,24 @@ const _removeDuplicatesFromArchive = (
     }
   }
 
+  return data;
+};
+
+const _removeDuplicatesFromArchive = (
+  data: AppDataComplete,
+  summary: RepairSummary,
+): AppDataComplete => {
+  if (!data.task || !data.archiveYoung?.task || !data.archiveOld?.task) {
+    return data;
+  }
+  // Runs again here: the subtask steps since the first call move tasks between
+  // live and archive.
+  _removeArchivedCopiesOfLiveTasks(data, summary);
+
   // Remove duplicates between archiveYoung and archiveOld (keep in archiveOld as it's older).
-  // Read the ids left after the removals above, not the snapshots: rebuilding
-  // archiveYoung from its snapshot would bring back the ids of live duplicates
-  // without an entity, and counting from the snapshots would count those twice.
+  // Read the ids left after the live copies are gone: rebuilding archiveYoung
+  // from ids read before that would bring back the ids of live duplicates
+  // without an entity, and count them twice.
   const remainingYoungIds = data.archiveYoung.task.ids as string[];
   const remainingOldIdSet = new Set<string>(data.archiveOld.task.ids as string[]);
   const duplicateBetweenArchives = remainingYoungIds.filter((id) =>

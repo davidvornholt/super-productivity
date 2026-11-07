@@ -226,6 +226,57 @@ describe('dataRepair()', () => {
     expect(validateFull(repaired)).toEqual(jasmine.objectContaining({ isValid: true }));
   });
 
+  for (const archive of ['archiveYoung', 'archiveOld'] as const) {
+    it(`restores the archived child of a live parent with a stale ${archive} copy`, () => {
+      const parent: Task = {
+        ...DEFAULT_TASK,
+        id: 'PARENT',
+        title: 'PARENT',
+        projectId: FAKE_PROJECT_ID,
+        subTaskIds: ['CHILD'],
+        notes: 'Current synthetic notes',
+        timeSpent: 600000,
+        timeSpentOnDay: { ['2026-06-16']: 600000 },
+      };
+      const child: Task = {
+        ...DEFAULT_TASK,
+        id: 'CHILD',
+        title: 'CHILD',
+        projectId: FAKE_PROJECT_ID,
+        parentId: parent.id,
+      };
+      mock.project.entities[FAKE_PROJECT_ID] = {
+        ...DEFAULT_PROJECT,
+        id: FAKE_PROJECT_ID,
+        title: 'FAKE_PROJECT',
+        taskIds: [parent.id],
+      };
+      mock.task = {
+        ...mock.task,
+        ...fakeEntityStateFromArray<Task>([parent]),
+      } as TaskState;
+      mock[archive].task = fakeEntityStateFromArray<Task>([
+        {
+          ...parent,
+          notes: 'Older synthetic notes',
+          timeSpent: 0,
+          timeSpentOnDay: {},
+          isDone: true,
+        },
+        child,
+      ]) as TaskArchive;
+
+      const repaired = dataRepair(mock).data;
+
+      expect(repaired.task.entities[parent.id]).toEqual(parent);
+      expect(repaired.task.entities[child.id]).toEqual(child);
+      expect(repaired.task.ids).toEqual([parent.id, child.id]);
+      expect(repaired[archive].task.ids).toEqual([]);
+      expect(repaired[archive].task.entities).toEqual({});
+      expect(validateFull(repaired)).toEqual(jasmine.objectContaining({ isValid: true }));
+    });
+  }
+
   it('should delete missing tasks for tags today list', () => {
     const taskState = {
       ...mock.task,
