@@ -1,5 +1,6 @@
 import { createAppDataCompleteMock } from '../../util/app-data-mock';
 import { dataRepair } from './data-repair';
+import { validateFull } from './validation-fn';
 import { fakeEntityStateFromArray } from '../../util/fake-entity-state-from-array';
 import {
   DEFAULT_TASK,
@@ -181,6 +182,49 @@ describe('dataRepair()', () => {
       });
     }
   }
+
+  it('drops archived copies of live tasks without bringing their archive ids back', () => {
+    const task = (id: string): Task => ({
+      ...DEFAULT_TASK,
+      id,
+      title: id,
+      projectId: FAKE_PROJECT_ID,
+    });
+    const liveInYoung = task('LIVE_IN_YOUNG');
+    const liveInBoth = task('LIVE_IN_BOTH_ARCHIVES');
+    const archivedInBoth: Task = { ...task('ARCHIVED_IN_BOTH'), isDone: true };
+    mock.project.entities[FAKE_PROJECT_ID] = {
+      ...DEFAULT_PROJECT,
+      id: FAKE_PROJECT_ID,
+      title: 'FAKE_PROJECT',
+      taskIds: [liveInYoung.id, liveInBoth.id],
+    };
+    mock.task = {
+      ...mock.task,
+      ...fakeEntityStateFromArray<Task>([liveInYoung, liveInBoth]),
+    } as TaskState;
+    mock.archiveYoung.task = fakeEntityStateFromArray<Task>([
+      liveInYoung,
+      liveInBoth,
+      archivedInBoth,
+    ]) as TaskArchive;
+    mock.archiveOld.task = fakeEntityStateFromArray<Task>([
+      liveInBoth,
+      archivedInBoth,
+    ]) as TaskArchive;
+
+    const { data: repaired, repairSummary } = dataRepair(mock);
+
+    for (const archive of [repaired.archiveYoung.task, repaired.archiveOld.task]) {
+      expect([...archive.ids].sort()).toEqual(Object.keys(archive.entities).sort());
+    }
+    expect(repaired.archiveYoung.task.ids).toEqual([]);
+    expect(repaired.archiveOld.task.ids).toEqual([archivedInBoth.id]);
+    // Four copies go: both live tasks from archiveYoung, LIVE_IN_BOTH_ARCHIVES
+    // from archiveOld and ARCHIVED_IN_BOTH from archiveYoung.
+    expect(repairSummary.entityStateFixed).toBe(4);
+    expect(validateFull(repaired)).toEqual(jasmine.objectContaining({ isValid: true }));
+  });
 
   it('should delete missing tasks for tags today list', () => {
     const taskState = {

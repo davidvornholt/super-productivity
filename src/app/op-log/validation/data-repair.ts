@@ -428,15 +428,18 @@ const _removeDuplicatesFromArchive = (
     }
   }
 
-  // Remove duplicates between archiveYoung and archiveOld (keep in archiveOld as it's older)
-  const duplicateBetweenArchives = archiveYoungTaskIds.filter((id) =>
-    archiveOldIdSet.has(id),
+  // Remove duplicates between archiveYoung and archiveOld (keep in archiveOld as it's older).
+  // Read the ids left after the removals above, not the snapshots: rebuilding
+  // archiveYoung from its snapshot would bring back the ids of live duplicates
+  // without an entity, and counting from the snapshots would count those twice.
+  const remainingYoungIds = data.archiveYoung.task.ids as string[];
+  const remainingOldIdSet = new Set<string>(data.archiveOld.task.ids as string[]);
+  const duplicateBetweenArchives = remainingYoungIds.filter((id) =>
+    remainingOldIdSet.has(id),
   );
   if (duplicateBetweenArchives.length) {
     const dupBetweenSet = new Set<string>(duplicateBetweenArchives);
-    data.archiveYoung.task.ids = archiveYoungTaskIds.filter(
-      (id) => !dupBetweenSet.has(id),
-    );
+    data.archiveYoung.task.ids = remainingYoungIds.filter((id) => !dupBetweenSet.has(id));
     duplicateBetweenArchives.forEach((id) => {
       if (data.archiveYoung.task.entities[id]) {
         delete data.archiveYoung.task.entities[id];
