@@ -1462,7 +1462,7 @@ describe('PluginIssueProviderAdapterService', () => {
         expect(taskServiceSpy.removeMultipleTasks).toHaveBeenCalledOnceWith(['task-1']);
       });
 
-      it('should auto-delete local task when getById returns 410 and no time tracked', async () => {
+      it('should offer deletion when getById returns 410 and no time tracked', async () => {
         const provider = createMockProvider({
           getById: jasmine
             .createSpy('getById')
@@ -1482,11 +1482,13 @@ describe('PluginIssueProviderAdapterService', () => {
         const result = await service.getFreshDataForIssueTask(task);
 
         expect(result).toBeNull();
-        expect(taskServiceSpy.removeMultipleTasks).toHaveBeenCalledWith(['task-1']);
+        expect(taskServiceSpy.removeMultipleTasks).not.toHaveBeenCalled();
         expect(snackSpy.open).toHaveBeenCalledWith(
           jasmine.objectContaining({
-            type: 'CUSTOM',
+            type: 'WARNING',
             ico: 'delete_forever',
+            actionStr: T.G.DELETE,
+            actionFn: jasmine.any(Function),
           }),
         );
       });
@@ -1579,7 +1581,7 @@ describe('PluginIssueProviderAdapterService', () => {
         expect(taskServiceSpy.removeMultipleTasks).not.toHaveBeenCalled();
       });
 
-      it('should auto-delete task when issue state matches deletedStates (no time tracked)', async () => {
+      it('should offer deletion when issue state matches deletedStates (no time tracked)', async () => {
         const provider = createMockProvider({
           getById: jasmine.createSpy('getById').and.resolveTo({
             id: 'ISS-5',
@@ -1602,11 +1604,13 @@ describe('PluginIssueProviderAdapterService', () => {
         const result = await service.getFreshDataForIssueTask(task);
 
         expect(result).toBeNull();
-        expect(taskServiceSpy.removeMultipleTasks).toHaveBeenCalledWith(['task-1']);
+        expect(taskServiceSpy.removeMultipleTasks).not.toHaveBeenCalled();
         expect(snackSpy.open).toHaveBeenCalledWith(
           jasmine.objectContaining({
-            type: 'CUSTOM',
+            type: 'WARNING',
             ico: 'delete_forever',
+            actionStr: T.G.DELETE,
+            actionFn: jasmine.any(Function),
           }),
         );
       });
@@ -1669,7 +1673,7 @@ describe('PluginIssueProviderAdapterService', () => {
         expect(taskServiceSpy.removeMultipleTasks).not.toHaveBeenCalled();
       });
 
-      it('should match deletedStates case-insensitively and auto-delete (no time tracked)', async () => {
+      it('should match deletedStates case-insensitively and offer deletion (no time tracked)', async () => {
         const provider = createMockProvider({
           getById: jasmine.createSpy('getById').and.resolveTo({
             id: 'ISS-5',
@@ -1692,11 +1696,13 @@ describe('PluginIssueProviderAdapterService', () => {
         const result = await service.getFreshDataForIssueTask(task);
 
         expect(result).toBeNull();
-        expect(taskServiceSpy.removeMultipleTasks).toHaveBeenCalledWith(['task-1']);
+        expect(taskServiceSpy.removeMultipleTasks).not.toHaveBeenCalled();
         expect(snackSpy.open).toHaveBeenCalledWith(
           jasmine.objectContaining({
-            type: 'CUSTOM',
+            type: 'WARNING',
             ico: 'delete_forever',
+            actionStr: T.G.DELETE,
+            actionFn: jasmine.any(Function),
           }),
         );
       });
