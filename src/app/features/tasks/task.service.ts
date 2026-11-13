@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import typia from 'typia';
 import { distinctUntilChanged, first, map, take, withLatestFrom } from 'rxjs/operators';
 import { computed, effect, inject, Injectable, untracked } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
 import {
   ArchiveTask,
@@ -244,8 +244,8 @@ export class TaskService {
         }
       });
 
-    // Flush accumulated time when task stops (currentTaskId becomes null or changes)
-    this.currentTaskId$.subscribe(() => {
+    // Flush after reduction, with the action that moved/stopped the pointer.
+    this._taskTimeSync.taskChange$.pipe(takeUntilDestroyed()).subscribe(() => {
       this._flushAccumulatedTimeSpent();
     });
 
