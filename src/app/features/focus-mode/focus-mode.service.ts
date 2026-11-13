@@ -1,5 +1,5 @@
-import { computed, inject, Injectable } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { computed, inject, Injectable, Signal } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { filter, tap } from 'rxjs/operators';
 import * as actions from './store/focus-mode.actions';
@@ -19,43 +19,51 @@ export class FocusModeService {
   private _globalConfigService = inject(GlobalConfigService);
   private _globalTrackingInterval = inject(GlobalTrackingIntervalService);
   private _strategyFactory = inject(FocusModeStrategyFactory);
-  private _timer = this._store.selectSignal(selectors.selectTimer);
+  // store.selectSignal marks its consumers dirty on every store change before
+  // comparing values, so the always-rendered focus button and effects reading
+  // these scheduled change detection for every action, e.g. each tracking tick.
+  // store.select emits only changed values.
+  private _selectSignal<T>(selector: (state: object) => T): Signal<T> {
+    return toSignal(this._store.select(selector), { requireSync: true });
+  }
+
+  private _timer = this._selectSignal(selectors.selectTimer);
 
   // State signals
-  currentScreen = this._store.selectSignal(selectors.selectCurrentScreen);
-  mainState = this._store.selectSignal(selectors.selectMainState);
-  mode = this._store.selectSignal(selectors.selectMode);
-  isOverlayShown = this._store.selectSignal(selectors.selectIsOverlayShown);
-  currentCycle = this._store.selectSignal(selectors.selectCurrentCycle);
+  currentScreen = this._selectSignal(selectors.selectCurrentScreen);
+  mainState = this._selectSignal(selectors.selectMainState);
+  mode = this._selectSignal(selectors.selectMode);
+  isOverlayShown = this._selectSignal(selectors.selectIsOverlayShown);
+  currentCycle = this._selectSignal(selectors.selectCurrentCycle);
 
   // Timer signals
-  isRunning = this._store.selectSignal(selectors.selectIsRunning);
-  timeElapsed = this._store.selectSignal(selectors.selectTimeElapsed);
-  timeRemaining = this._store.selectSignal(selectors.selectTimeRemaining);
-  progress = this._store.selectSignal(selectors.selectProgress);
-  sessionDuration = this._store.selectSignal(selectors.selectTimeDuration);
+  isRunning = this._selectSignal(selectors.selectIsRunning);
+  timeElapsed = this._selectSignal(selectors.selectTimeElapsed);
+  timeRemaining = this._selectSignal(selectors.selectTimeRemaining);
+  progress = this._selectSignal(selectors.selectProgress);
+  sessionDuration = this._selectSignal(selectors.selectTimeDuration);
 
   // Session signals
-  isSessionRunning = this._store.selectSignal(selectors.selectIsSessionRunning);
-  isSessionPaused = this._store.selectSignal(selectors.selectIsSessionPaused);
-  isSessionCompleted = this._store.selectSignal(selectors.selectIsSessionCompleted);
+  isSessionRunning = this._selectSignal(selectors.selectIsSessionRunning);
+  isSessionPaused = this._selectSignal(selectors.selectIsSessionPaused);
+  isSessionCompleted = this._selectSignal(selectors.selectIsSessionCompleted);
 
   // Break signals
-  isBreakActive = this._store.selectSignal(selectors.selectIsBreakActive);
-  isLongBreak = this._store.selectSignal(selectors.selectIsLongBreak);
+  isBreakActive = this._selectSignal(selectors.selectIsBreakActive);
+  isLongBreak = this._selectSignal(selectors.selectIsLongBreak);
 
   // Config signals
   pomodoroConfig = this._globalConfigService.pomodoroConfig;
-  focusModeConfig = this._store.selectSignal(selectFocusModeConfig);
+  focusModeConfig = this._selectSignal(selectFocusModeConfig);
 
   // Overtime
-  isInOvertime = this._store.selectSignal(selectors.selectIsInOvertime);
+  isInOvertime = this._selectSignal(selectors.selectIsInOvertime);
 
   // Compatibility aliases (TODO: remove when components are updated)
   isBreakLong = this.isLongBreak;
 
   // Additional compatibility signals
-  lastSessionTotalDurationOrTimeElapsedFallback = this._store.selectSignal(
+  lastSessionTotalDurationOrTimeElapsedFallback = this._selectSignal(
     selectors.selectLastSessionDuration,
   );
 
