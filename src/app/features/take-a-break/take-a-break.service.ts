@@ -75,7 +75,7 @@ export class TakeABreakService {
   //
   // Cost: _timeWithNoCurrentTask$ grows monotonically while nothing is tracked,
   // so a plain filter re-fired on every 1s tick for as long as the app stayed
-  // open — and timeWorkingWithoutABreak$ is bound via `| async` in the work
+  // open — and timeWorkingWithoutABreak$ was bound via `| async` in the work
   // view, so each one cost a change-detection pass.
   //
   // Semantics: the reset now fires once per untracked stretch instead of pinning
@@ -172,6 +172,16 @@ export class TakeABreakService {
     }),
     shareReplay(1),
   );
+
+  // The work view prints this counter in whole minutes. Binding the per-second
+  // value re-rendered the view, and so painted a frame, every second while a
+  // task was tracked, although the printed text changes once a minute. The
+  // reminder, lock screen and fullscreen blocker keep the per-second value.
+  timeWorkingWithoutABreakWholeMinutes$: Observable<number> =
+    this.timeWorkingWithoutABreak$.pipe(
+      map((ms) => Math.floor(ms / 60000) * 60000),
+      distinctUntilChanged(),
+    );
 
   private _triggerLockScreenCounter$: Subject<boolean> = new Subject();
   // NOTE: no throttle here or on the fullscreen blocker below — the real
