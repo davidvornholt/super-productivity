@@ -64,7 +64,7 @@
                     matTooltipPosition="above"
                   >
                     <strong class="time-val">{{
-                      (takeABreakService.timeWorkingWithoutABreak$
+                      (takeABreakService.timeWorkingWithoutABreakWholeMinutes$
                         | async
                         | msToString: false : true) || '0m'
                     }}</strong
