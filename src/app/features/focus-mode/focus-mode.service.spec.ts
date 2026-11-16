@@ -5,7 +5,7 @@ import {
   discardPeriodicTasks,
 } from '@angular/core/testing';
 import { Store } from '@ngrx/store';
-import { of } from 'rxjs';
+import { BehaviorSubject, map, of } from 'rxjs';
 import { FocusModeService } from './focus-mode.service';
 import { GlobalConfigService } from '../config/global-config.service';
 import { FocusScreen, FocusModeMode, FocusMainUIState } from './focus-mode.model';
@@ -355,9 +355,9 @@ describe('FocusModeService.tryStartSessionForTask', () => {
   const MIN = 60_000;
   let service: FocusModeService;
   let dispatch: jasmine.Spy;
-  let mode: FocusModeMode;
-  let timerPurpose: 'work' | 'break' | null;
-  let focusCfg: { isShowPreparation?: boolean };
+  let mode: BehaviorSubject<FocusModeMode>;
+  let timerPurpose: BehaviorSubject<'work' | 'break' | null>;
+  let focusCfg: BehaviorSubject<{ isShowPreparation?: boolean }>;
   let strategyDuration: number;
   const task = {
     ...DEFAULT_TASK,
@@ -367,21 +367,21 @@ describe('FocusModeService.tryStartSessionForTask', () => {
   } as TaskCopy;
 
   beforeEach(() => {
-    mode = FocusModeMode.Countdown;
-    timerPurpose = null;
-    focusCfg = {};
+    mode = new BehaviorSubject<FocusModeMode>(FocusModeMode.Countdown);
+    timerPurpose = new BehaviorSubject<'work' | 'break' | null>(null);
+    focusCfg = new BehaviorSubject<{ isShowPreparation?: boolean }>({});
     strategyDuration = 25 * MIN;
     const storeSpy = jasmine.createSpyObj('Store', [
       'select',
       'dispatch',
       'selectSignal',
     ]);
-    storeSpy.select.and.returnValue(of(null));
-    storeSpy.selectSignal.and.callFake((selector: unknown) => {
-      if (selector === selectors.selectMode) return () => mode;
-      if (selector === selectors.selectTimer) return () => ({ purpose: timerPurpose });
-      if (selector === selectFocusModeConfig) return () => focusCfg;
-      return () => null;
+    storeSpy.select.and.callFake((selector: unknown) => {
+      if (selector === selectors.selectMode) return mode.asObservable();
+      if (selector === selectors.selectTimer)
+        return timerPurpose.pipe(map((purpose) => ({ purpose })));
+      if (selector === selectFocusModeConfig) return focusCfg.asObservable();
+      return of(null);
     });
     dispatch = storeSpy.dispatch;
     TestBed.configureTestingModule({
@@ -409,7 +409,7 @@ describe('FocusModeService.tryStartSessionForTask', () => {
   });
 
   it('keeps the configured duration for pomodoro', () => {
-    mode = FocusModeMode.Pomodoro;
+    mode.next(FocusModeMode.Pomodoro);
     service.tryStartSessionForTask(task);
     expect(dispatch).toHaveBeenCalledWith(
       actions.startFocusSession({ duration: 25 * MIN, taskId: 't1' }),
@@ -417,7 +417,7 @@ describe('FocusModeService.tryStartSessionForTask', () => {
   });
 
   it('starts flowtime with an open-ended duration', () => {
-    mode = FocusModeMode.Flowtime;
+    mode.next(FocusModeMode.Flowtime);
     strategyDuration = 0;
     service.tryStartSessionForTask(task);
     expect(dispatch).toHaveBeenCalledWith(
@@ -426,19 +426,19 @@ describe('FocusModeService.tryStartSessionForTask', () => {
   });
 
   it('does nothing during a break', () => {
-    timerPurpose = 'break';
+    timerPurpose.next('break');
     expect(service.tryStartSessionForTask(task)).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('does nothing when a session is already active', () => {
-    timerPurpose = 'work';
+    timerPurpose.next('work');
     expect(service.tryStartSessionForTask(task)).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('does nothing when the preparation screen is enabled', () => {
-    focusCfg = { isShowPreparation: true };
+    focusCfg.next({ isShowPreparation: true });
     expect(service.tryStartSessionForTask(task)).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
   });
